@@ -3,7 +3,7 @@
   ================================================================
   BE-TPP Admin Portal — Round C.1 (Foundation + Auth + Shell)
   ================================================================
-  Version:     v0.1.1 (patch: fix Tabler Icons CDN URL)
+  Version:     v0.2.0 (Round C.2 — Dashboard + Device List)
   Released:    20 April 2026
   File:        be-tpp-admin.html
   Author:      Claude (AI pair programmer) + Warunyu
@@ -12,18 +12,19 @@
   Backend:     Supabase brgzimwzcfbwkgymqzvy (Mumbai AWS, FREE)
   DS:          Tactical-Lite v1.3.0 (selective copy)
 
-  --- Round C.1 Scope ---
-  [A] App shell + sidebar + topbar (responsive 3 viewports)
-  [B] Email OTP authentication (2-step: email -> code)
-  [C] Admin guard (is_admin() RPC check)
-  [D] Logout flow
-  [E] i18n foundation (TH/EN toggle + localStorage persist)
-  [F] Empty Dashboard placeholder (full impl in C.2)
-  [G] Toast + loading patterns
+  --- Round C.1 + C.2 Scope ---
+  [A] App shell + sidebar + topbar (responsive 3 viewports)          [C.1]
+  [B] Email OTP authentication (2-step: email -> code)                [C.1]
+  [C] Admin guard (is_admin() RPC check)                              [C.1]
+  [D] Logout flow                                                     [C.1]
+  [E] i18n foundation (TH/EN toggle + localStorage persist)           [C.1]
+  [F] Toast + loading patterns                                        [C.1]
+  [G] Dashboard stat cards (devices/users/photos, live data)          [C.2]
+  [H] Device list: search + filter chips + table/cards + pagination   [C.2]
+  [I] Refresh controls + updated-at timestamp                         [C.2]
 
-  --- Not in C.1 (coming later) ---
-  C.2: Dashboard stats, Device list
-  C.3: Edit device modal, Photo upload
+  --- Not in C.2 (coming later) ---
+  C.3: Edit device modal, Photo upload with client-side resize
   C.4: PWA wrapper (manifest, service worker)
   Round D: User management UI
 
@@ -1152,6 +1153,273 @@
   .t-grid.g-4 { grid-template-columns: repeat(4, 1fr); }
   .t-grid > * { min-width: 0; }
 
+  /* ==============================================================
+     [16a] TABLES (Round C.2 — Device list)
+     ============================================================== */
+  .t-table-shell {
+    background: var(--bg-panel);
+    border: 1px solid var(--border-default);
+    border-radius: var(--r-lg);
+    overflow: hidden;
+  }
+  .t-table-wrap {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .t-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: var(--text-sm);
+  }
+  .t-table thead th {
+    background: var(--bg-surface);
+    color: var(--text-low);
+    font-family: var(--font-display);
+    font-size: var(--text-xs);
+    font-weight: 600;
+    letter-spacing: var(--tracking-wide);
+    text-transform: uppercase;
+    padding: var(--sp-3) var(--sp-4);
+    text-align: left;
+    border-bottom: 1px solid var(--border-default);
+    white-space: nowrap;
+    position: sticky;
+    top: 0;
+    z-index: var(--z-raised);
+  }
+  .t-table tbody td {
+    padding: var(--sp-3) var(--sp-4);
+    color: var(--text-medium);
+    border-bottom: 1px solid var(--border-subtle);
+    vertical-align: middle;
+  }
+  .t-table tbody tr:last-child td { border-bottom: none; }
+  .t-table tbody tr { transition: background var(--dur-fast) var(--ease-std); }
+  .t-table tbody tr:hover { background: var(--bg-surface-hover); }
+  .t-table-cell-mono {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--text-medium);
+    letter-spacing: 0.02em;
+  }
+  .t-table-cell-name {
+    color: var(--text-high);
+    font-weight: 500;
+  }
+  .t-table-cell-sub {
+    font-size: var(--text-2xs);
+    color: var(--text-low);
+    margin-top: 2px;
+  }
+  .t-table-thumb {
+    width: 40px; height: 40px;
+    border-radius: var(--r-md);
+    background: var(--bg-surface);
+    background-size: cover;
+    background-position: center;
+    flex-shrink: 0;
+    border: 1px solid var(--border-default);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-subtle);
+  }
+  .t-table-thumb i { font-size: 18px; }
+  .t-table-row-flex {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+  }
+
+  /* ==============================================================
+     [16b] SEARCH BAR (Round C.2)
+     ============================================================== */
+  .t-search {
+    position: relative;
+    flex: 1;
+    min-width: 200px;
+  }
+  .t-search input {
+    width: 100%;
+    background: var(--bg-input);
+    border: 1px solid var(--border-default);
+    border-radius: var(--r-md);
+    color: var(--text-high);
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    padding: 9px 14px 9px 38px;
+    outline: none;
+    transition: all var(--dur-fast) var(--ease-std);
+  }
+  .t-search input:hover { border-color: var(--border-strong); }
+  .t-search input:focus {
+    border-color: var(--color-primary);
+    box-shadow: var(--focus-ring);
+  }
+  .t-search-icon {
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-subtle);
+    font-size: 16px;
+    pointer-events: none;
+  }
+  .t-search-clear {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    color: var(--text-subtle);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: var(--r-xs);
+    display: none;
+  }
+  .t-search-clear:hover { color: var(--text-high); }
+  .t-search.has-value .t-search-clear { display: inline-flex; }
+
+  /* ==============================================================
+     [16c] FILTER CHIPS (Round C.2)
+     ============================================================== */
+  .t-filter-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+  }
+  .t-filter-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 12px;
+    border-radius: var(--r-full);
+    font-size: var(--text-xs);
+    font-weight: 500;
+    background: var(--bg-surface);
+    color: var(--text-medium);
+    border: 1px solid var(--border-default);
+    cursor: pointer;
+    transition: all var(--dur-fast) var(--ease-std);
+    white-space: nowrap;
+    font-family: var(--font-sans);
+  }
+  .t-filter-chip:hover:not(.is-active) {
+    border-color: var(--border-strong);
+    color: var(--text-high);
+  }
+  .t-filter-chip.is-active {
+    background: var(--color-primary-dim);
+    color: var(--color-primary);
+    border-color: var(--color-primary-border);
+    font-weight: 600;
+  }
+  .t-filter-chip .count {
+    font-family: var(--font-mono);
+    font-size: var(--text-2xs);
+    opacity: 0.75;
+    margin-left: 2px;
+  }
+
+  /* ==============================================================
+     [16d] PAGINATION (Round C.2)
+     ============================================================== */
+  .t-pagination {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+    justify-content: center;
+    padding: var(--sp-4);
+    border-top: 1px solid var(--border-subtle);
+  }
+  .t-page-btn {
+    min-width: 32px;
+    height: 32px;
+    padding: 0 8px;
+    border: 1px solid var(--border-default);
+    background: transparent;
+    color: var(--text-medium);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    font-weight: 500;
+    border-radius: var(--r-sm);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: all var(--dur-fast) var(--ease-std);
+  }
+  .t-page-btn:hover:not(:disabled):not(.is-active) {
+    color: var(--text-high);
+    border-color: var(--border-strong);
+    background: var(--bg-surface-hover);
+  }
+  .t-page-btn.is-active {
+    background: var(--color-primary);
+    color: var(--text-inverse);
+    border-color: var(--color-primary);
+  }
+  .t-page-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+  .t-page-info {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--text-low);
+    margin: 0 var(--sp-2);
+  }
+
+  /* ==============================================================
+     [16e] SKELETON LOADER (Round C.2)
+     ============================================================== */
+  .t-skeleton {
+    background: linear-gradient(
+      90deg,
+      var(--bg-surface) 0%,
+      var(--bg-surface-hover) 50%,
+      var(--bg-surface) 100%
+    );
+    background-size: 200% 100%;
+    animation: t-skeleton-shimmer 1.5s linear infinite;
+    border-radius: var(--r-sm);
+    display: inline-block;
+  }
+  @keyframes t-skeleton-shimmer {
+    from { background-position: 200% 0; }
+    to   { background-position: -200% 0; }
+  }
+  .t-skeleton.line { height: 12px; width: 100%; }
+  .t-skeleton.line.w-50 { width: 50%; }
+  .t-skeleton.line.w-30 { width: 30%; }
+  .t-skeleton.big { height: 40px; width: 80px; }
+
+  /* ==============================================================
+     [16f] TOOLBAR (Round C.2 — search + filter row)
+     ============================================================== */
+  .t-toolbar {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    flex-wrap: wrap;
+    padding: var(--sp-4);
+    border-bottom: 1px solid var(--border-subtle);
+    background: var(--bg-surface);
+  }
+  .t-toolbar-right {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    font-size: var(--text-xs);
+    color: var(--text-low);
+  }
+
   .t-flex { display: flex; }
   .t-flex.f-col { flex-direction: column; }
   .t-flex.f-center { align-items: center; justify-content: center; }
@@ -1325,6 +1593,47 @@
     .login-card { padding: var(--sp-6); }
     .login-heading { font-size: var(--text-xl); }
     .content-area { padding: var(--sp-4); }
+
+    /* Round C.2: Table → Cards transform */
+    .t-table-shell { border-radius: var(--r-md); }
+    .t-table-wrap { overflow-x: visible; }
+    .t-table, .t-table tbody { display: block; width: 100%; min-width: 0; }
+    .t-table thead { display: none; }
+    .t-table tbody tr {
+      display: block;
+      border: 1px solid var(--border-default);
+      border-radius: var(--r-md);
+      margin-bottom: var(--sp-3);
+      padding: var(--sp-3);
+      background: var(--bg-panel);
+    }
+    .t-table tbody tr:hover { background: var(--bg-panel); }
+    .t-table tbody td {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      padding: 6px 0;
+      border-bottom: 1px dashed var(--border-subtle);
+      gap: var(--sp-3);
+    }
+    .t-table tbody td:last-child { border-bottom: none; padding-bottom: 0; }
+    .t-table tbody td:first-child { padding-top: 0; }
+    .t-table tbody td::before {
+      content: attr(data-label);
+      font-family: var(--font-display);
+      font-size: var(--text-2xs);
+      color: var(--text-low);
+      text-transform: uppercase;
+      letter-spacing: var(--tracking-wide);
+      font-weight: 600;
+      flex-shrink: 0;
+      min-width: 90px;
+    }
+    .t-table-row-flex { justify-content: flex-end; }
+
+    .t-toolbar { flex-direction: column; align-items: stretch; }
+    .t-toolbar-right { margin-left: 0; justify-content: flex-end; }
+    .t-search { min-width: 0; }
   }
 
   @media (max-width: 480px) {
@@ -1566,61 +1875,118 @@
           <h2 class="t-h2 t-mb-2" data-i18n="dashboard.title">Dashboard</h2>
           <p class="t-body t-mb-5" id="dashboard-welcome">—</p>
 
-          <!-- Placeholder stat cards -->
-          <div class="t-grid g-3">
-            <div class="t-stat">
+          <!-- Live stat cards (populated by loadDashboard) -->
+          <div class="t-grid g-3" id="dashboard-stats">
+            <div class="t-stat" data-stat="devices">
               <div class="t-stat-header">
                 <div class="t-stat-label" data-i18n="dashboard.stat.devices">Devices</div>
                 <div class="t-stat-icon"><i class="ti ti-device-desktop-analytics"></i></div>
               </div>
-              <div class="t-stat-value is-placeholder">—</div>
-              <div class="t-stat-sub" data-i18n="dashboard.stat.comingSoon">Coming in C.2</div>
+              <div class="t-stat-value" data-stat-value="devices">
+                <span class="t-skeleton big"></span>
+              </div>
+              <div class="t-stat-sub" data-stat-sub="devices">&nbsp;</div>
             </div>
-            <div class="t-stat">
+            <div class="t-stat" data-stat="users">
               <div class="t-stat-header">
                 <div class="t-stat-label" data-i18n="dashboard.stat.users">Users</div>
                 <div class="t-stat-icon"><i class="ti ti-users"></i></div>
               </div>
-              <div class="t-stat-value is-placeholder">—</div>
-              <div class="t-stat-sub" data-i18n="dashboard.stat.comingSoon">Coming in C.2</div>
+              <div class="t-stat-value" data-stat-value="users">
+                <span class="t-skeleton big"></span>
+              </div>
+              <div class="t-stat-sub" data-stat-sub="users">&nbsp;</div>
             </div>
-            <div class="t-stat">
+            <div class="t-stat" data-stat="photos">
               <div class="t-stat-header">
                 <div class="t-stat-label" data-i18n="dashboard.stat.photos">Photos</div>
                 <div class="t-stat-icon"><i class="ti ti-photo"></i></div>
               </div>
-              <div class="t-stat-value is-placeholder">—</div>
-              <div class="t-stat-sub" data-i18n="dashboard.stat.comingSoon">Coming in C.2</div>
+              <div class="t-stat-value" data-stat-value="photos">
+                <span class="t-skeleton big"></span>
+              </div>
+              <div class="t-stat-sub" data-stat-sub="photos">&nbsp;</div>
             </div>
           </div>
 
-          <!-- Info alert -->
-          <div class="t-panel t-mt-6">
-            <div class="t-panel-body">
-              <div class="t-empty">
-                <div class="t-empty-icon"><i class="ti ti-rocket"></i></div>
-                <div class="t-empty-title" data-i18n="dashboard.readyTitle">Round C.1 ready</div>
-                <div class="t-empty-description" data-i18n="dashboard.readyDescription">
-                  Authentication, i18n, and shell are working. Device management UI arrives in Round C.2.
-                </div>
-              </div>
-            </div>
+          <!-- Refresh control -->
+          <div class="t-flex t-gap-3 t-mt-4" style="align-items: center; flex-wrap: wrap;">
+            <button type="button" class="t-btn v-ghost btn-sm" id="btn-refresh-dashboard">
+              <i class="ti ti-refresh"></i>
+              <span data-i18n="common.refresh">Refresh</span>
+            </button>
+            <span class="t-muted" id="dashboard-updated-at">&nbsp;</span>
           </div>
         </section>
 
-        <!-- Devices view (placeholder) -->
+        <!-- Devices view -->
         <section id="view-devices" class="app-view-section" hidden>
           <h2 class="t-h2 t-mb-2" data-i18n="devices.title">Devices</h2>
-          <div class="t-panel t-mt-4">
-            <div class="t-panel-body">
-              <div class="t-empty">
-                <div class="t-empty-icon"><i class="ti ti-tools"></i></div>
-                <div class="t-empty-title" data-i18n="devices.placeholderTitle">Coming soon</div>
-                <div class="t-empty-description" data-i18n="devices.placeholder">
-                  The device list with search, filter, and edit will be available in Round C.2.
-                </div>
+          <p class="t-body t-mb-4" data-i18n="devices.subtitle">
+            Manage all registered devices across all users.
+          </p>
+
+          <!-- Devices panel -->
+          <div class="t-table-shell">
+            <!-- Toolbar: search + filter chips -->
+            <div class="t-toolbar">
+              <div class="t-search" id="device-search-wrap">
+                <i class="ti ti-search t-search-icon" aria-hidden="true"></i>
+                <input
+                  type="search"
+                  id="device-search"
+                  data-i18n-placeholder="devices.searchPlaceholder"
+                  placeholder="Search device ID, name, owner..."
+                  autocomplete="off"
+                  spellcheck="false"
+                >
+                <button type="button" class="t-search-clear" id="device-search-clear" aria-label="Clear search">
+                  <i class="ti ti-x"></i>
+                </button>
+              </div>
+
+              <div class="t-filter-group" role="group" aria-label="Filter devices">
+                <button type="button" class="t-filter-chip is-active" data-filter="all">
+                  <span data-i18n="filter.all">All</span>
+                  <span class="count" data-count="all">0</span>
+                </button>
+                <button type="button" class="t-filter-chip" data-filter="public">
+                  <span data-i18n="filter.public">Public</span>
+                  <span class="count" data-count="public">0</span>
+                </button>
+                <button type="button" class="t-filter-chip" data-filter="private">
+                  <span data-i18n="filter.private">Private</span>
+                  <span class="count" data-count="private">0</span>
+                </button>
+                <button type="button" class="t-filter-chip" data-filter="online">
+                  <span data-i18n="filter.online">Online</span>
+                  <span class="count" data-count="online">0</span>
+                </button>
+                <button type="button" class="t-filter-chip" data-filter="offline">
+                  <span data-i18n="filter.offline">Offline</span>
+                  <span class="count" data-count="offline">0</span>
+                </button>
+              </div>
+
+              <div class="t-toolbar-right">
+                <button type="button" class="t-btn v-ghost btn-sm" id="btn-refresh-devices">
+                  <i class="ti ti-refresh"></i>
+                  <span data-i18n="common.refresh">Refresh</span>
+                </button>
               </div>
             </div>
+
+            <!-- Table body (or skeleton / empty state) -->
+            <div id="devices-body">
+              <!-- Initial skeleton shown here -->
+              <div class="t-loading-inline">
+                <span class="t-spinner spinner-sm" aria-hidden="true"></span>
+                <span data-i18n="common.loading">Loading...</span>
+              </div>
+            </div>
+
+            <!-- Pagination -->
+            <div class="t-pagination" id="devices-pagination" hidden></div>
           </div>
         </section>
 
@@ -1645,8 +2011,8 @@
   const SUPABASE_URL = 'https://brgzimwzcfbwkgymqzvy.supabase.co';
   const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJyZ3ppbXd6Y2Zid2tneW1xenZ5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgwMzgzMDMsImV4cCI6MjA4MzYxNDMwM30.kSZCG67OlQVR_2ECFpA7uqi4TeQ1osIlngOJJ6OI5dM';
 
-  const APP_VERSION = 'v0.1.1';
-  const APP_ROUND = 'C.1';
+  const APP_VERSION = 'v0.2.0';
+  const APP_ROUND = 'C.2';
 
   const STORAGE_KEYS = {
     lang:  'be-tpp-admin.lang',
@@ -1676,7 +2042,18 @@
     currentView:    'dashboard',  // 'dashboard' | 'devices' | 'users'
     currentLang:    'en',         // 'en' | 'th'
     currentTheme:   'dark',       // 'dark' | 'light'
-    pendingEmail:   null          // email ที่กำลัง verify OTP
+    pendingEmail:   null,         // email ที่กำลัง verify OTP
+    // Round C.2: data caches
+    devices:        null,         // Array ของ device จาก admin_list_all_devices (null = ยังไม่โหลด)
+    users:          null,         // Array ของ user จาก admin_list_all_users
+    devicesLoading: false,
+    // Round C.2: device list view state
+    deviceSearch:   '',           // search query
+    deviceFilter:   'all',        // 'all'|'public'|'private'|'online'|'offline'
+    devicePage:     1,            // current page (1-indexed)
+    devicePageSize: 20,
+    // Last-loaded timestamps
+    dashboardLoadedAt: null
   };
 
   // =================================================================
@@ -1698,6 +2075,20 @@
       'common.close': 'Close',
       'common.error': 'Error',
       'common.success': 'Success',
+      'common.refresh': 'Refresh',
+      'common.search': 'Search',
+      'common.clear': 'Clear',
+      'common.retry': 'Retry',
+      'common.unknown': 'Unknown',
+      'common.yes': 'Yes',
+      'common.no': 'No',
+
+      // Filter chips
+      'filter.all': 'All',
+      'filter.public': 'Public',
+      'filter.private': 'Private',
+      'filter.online': 'Online',
+      'filter.offline': 'Offline',
 
       // Login — step 1 (email)
       'login.heading': 'Sign in',
@@ -1743,13 +2134,48 @@
       'dashboard.stat.users': 'Users',
       'dashboard.stat.photos': 'Photos',
       'dashboard.stat.comingSoon': 'Coming in C.2',
+      'dashboard.stat.devicesSub': '{publicCount} public, {privateCount} private',
+      'dashboard.stat.usersSub': '{adminCount} admins',
+      'dashboard.stat.photosSub': 'Devices with photos',
+      'dashboard.updatedAt': 'Updated {time}',
       'dashboard.readyTitle': 'Round C.1 ready',
       'dashboard.readyDescription': 'Authentication, i18n, and shell are working. Device management UI arrives in Round C.2.',
 
       // Devices
       'devices.title': 'Devices',
+      'devices.subtitle': 'Manage all registered devices across all users.',
+      'devices.searchPlaceholder': 'Search device ID, name, owner...',
+      'devices.col.device': 'Device',
+      'devices.col.owner': 'Owner',
+      'devices.col.location': 'Location',
+      'devices.col.status': 'Status',
+      'devices.col.visibility': 'Visibility',
+      'devices.col.lastSeen': 'Last seen',
+      'devices.col.actions': 'Actions',
+      'devices.empty.title': 'No devices found',
+      'devices.empty.description': 'No devices match your current search or filter. Try adjusting them.',
+      'devices.empty.noData': 'There are no devices registered in the system yet.',
+      'devices.error.title': 'Failed to load devices',
+      'devices.error.description': 'Please check your connection and try again.',
+      'devices.count': 'Showing {shown} of {total}',
+      'devices.editSoon': 'Edit arrives in C.3',
       'devices.placeholderTitle': 'Coming soon',
       'devices.placeholder': 'The device list with search, filter, and edit will be available in Round C.2.',
+
+      // Status
+      'status.online': 'Online',
+      'status.offline': 'Offline',
+      'status.unknown': 'Unknown',
+      'status.public': 'Public',
+      'status.private': 'Private',
+
+      // Time formatting
+      'time.justNow': 'Just now',
+      'time.secondsAgo': '{n}s ago',
+      'time.minutesAgo': '{n}m ago',
+      'time.hoursAgo': '{n}h ago',
+      'time.daysAgo': '{n}d ago',
+      'time.never': 'Never',
 
       // Toast messages
       'toast.otpSentTitle': 'Code sent',
@@ -1779,6 +2205,20 @@
       'common.close': 'ปิด',
       'common.error': 'ข้อผิดพลาด',
       'common.success': 'สำเร็จ',
+      'common.refresh': 'รีเฟรช',
+      'common.search': 'ค้นหา',
+      'common.clear': 'ล้าง',
+      'common.retry': 'ลองใหม่',
+      'common.unknown': 'ไม่ทราบ',
+      'common.yes': 'ใช่',
+      'common.no': 'ไม่',
+
+      // Filter chips
+      'filter.all': 'ทั้งหมด',
+      'filter.public': 'สาธารณะ',
+      'filter.private': 'ส่วนตัว',
+      'filter.online': 'ออนไลน์',
+      'filter.offline': 'ออฟไลน์',
 
       // Login — step 1
       'login.heading': 'เข้าสู่ระบบ',
@@ -1824,13 +2264,48 @@
       'dashboard.stat.users': 'ผู้ใช้',
       'dashboard.stat.photos': 'รูปภาพ',
       'dashboard.stat.comingSoon': 'จะมาใน C.2',
+      'dashboard.stat.devicesSub': 'สาธารณะ {publicCount} · ส่วนตัว {privateCount}',
+      'dashboard.stat.usersSub': 'แอดมิน {adminCount} คน',
+      'dashboard.stat.photosSub': 'อุปกรณ์ที่มีรูป',
+      'dashboard.updatedAt': 'อัปเดตเมื่อ {time}',
       'dashboard.readyTitle': 'Round C.1 พร้อมใช้งาน',
       'dashboard.readyDescription': 'ระบบ authentication, i18n, และ shell ทำงานได้แล้ว — Device UI จะมาใน Round C.2',
 
       // Devices
       'devices.title': 'อุปกรณ์',
+      'devices.subtitle': 'จัดการอุปกรณ์ทั้งหมดของทุก user ในระบบ',
+      'devices.searchPlaceholder': 'ค้นหา device ID, ชื่อ, owner...',
+      'devices.col.device': 'อุปกรณ์',
+      'devices.col.owner': 'เจ้าของ',
+      'devices.col.location': 'สถานที่',
+      'devices.col.status': 'สถานะ',
+      'devices.col.visibility': 'การมองเห็น',
+      'devices.col.lastSeen': 'เห็นล่าสุด',
+      'devices.col.actions': 'จัดการ',
+      'devices.empty.title': 'ไม่พบอุปกรณ์',
+      'devices.empty.description': 'ไม่มีอุปกรณ์ตรงกับคำค้น/filter ปัจจุบัน ลองปรับใหม่',
+      'devices.empty.noData': 'ยังไม่มีอุปกรณ์ลงทะเบียนในระบบ',
+      'devices.error.title': 'โหลดข้อมูลอุปกรณ์ไม่สำเร็จ',
+      'devices.error.description': 'กรุณาตรวจสอบการเชื่อมต่อและลองใหม่',
+      'devices.count': 'แสดง {shown} จาก {total}',
+      'devices.editSoon': 'แก้ไขจะมาใน C.3',
       'devices.placeholderTitle': 'เร็วๆ นี้',
       'devices.placeholder': 'รายการอุปกรณ์พร้อม search/filter/edit จะมาใน Round C.2',
+
+      // Status
+      'status.online': 'ออนไลน์',
+      'status.offline': 'ออฟไลน์',
+      'status.unknown': 'ไม่ทราบ',
+      'status.public': 'สาธารณะ',
+      'status.private': 'ส่วนตัว',
+
+      // Time formatting
+      'time.justNow': 'เมื่อสักครู่',
+      'time.secondsAgo': '{n} วิ ที่แล้ว',
+      'time.minutesAgo': '{n} นาที ที่แล้ว',
+      'time.hoursAgo': '{n} ชม. ที่แล้ว',
+      'time.daysAgo': '{n} วัน ที่แล้ว',
+      'time.never': 'ไม่เคย',
 
       // Toast messages
       'toast.otpSentTitle': 'ส่งรหัสแล้ว',
@@ -1952,6 +2427,8 @@
       btn.classList.toggle('is-active', btn.getAttribute('data-lang-btn') === lang);
     });
     applyTranslations();
+    // Notify dynamic content to re-render (devices list, etc.)
+    document.dispatchEvent(new CustomEvent('lang-changed'));
   }
 
   /**
@@ -1982,6 +2459,65 @@
     const temp = document.createElement('div');
     temp.textContent = String(str == null ? '' : str);
     return temp.innerHTML;
+  }
+
+  /**
+   * getField(obj, ...keys) — ดึงค่า field แรกที่ไม่ใช่ undefined
+   * รองรับทั้ง snake_case + camelCase ตาม CI
+   * เช่น getField(row, 'device_id', 'deviceId')
+   */
+  function getField(obj) {
+    if (!obj) return null;
+    for (let i = 1; i < arguments.length; i++) {
+      const key = arguments[i];
+      if (obj[key] !== undefined) return obj[key];
+    }
+    return null;
+  }
+
+  /**
+   * escapeRegex(str) — escape สำหรับสร้าง RegExp จาก user input (search)
+   */
+  function escapeRegex(str) {
+    return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  /**
+   * formatRelativeTime(input) — แปลง timestamp หรือ seconds → "5m ago" เป็นต้น
+   * input = ISO string หรือ number (seconds elapsed)
+   */
+  function formatRelativeTime(input) {
+    if (input == null) return t('time.never');
+
+    let seconds;
+    if (typeof input === 'number') {
+      seconds = input;
+    } else {
+      const ts = Date.parse(input);
+      if (isNaN(ts)) return t('common.unknown');
+      seconds = (Date.now() - ts) / 1000;
+    }
+    seconds = Math.max(0, Math.floor(seconds));
+
+    if (seconds < 10) return t('time.justNow');
+    if (seconds < 60) return t('time.secondsAgo', { n: seconds });
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return t('time.minutesAgo', { n: minutes });
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return t('time.hoursAgo', { n: hours });
+    const days = Math.floor(hours / 24);
+    return t('time.daysAgo', { n: days });
+  }
+
+  /**
+   * formatClockTime(d) — short time string for timestamps like "14:35"
+   */
+  function formatClockTime(d) {
+    try {
+      const date = d instanceof Date ? d : new Date(d);
+      return date.toLocaleTimeString(state.currentLang === 'th' ? 'th-TH' : 'en-US',
+        { hour: '2-digit', minute: '2-digit' });
+    } catch (_) { return ''; }
   }
 
   /**
@@ -2152,7 +2688,7 @@
   // =================================================================
   function switchView(view) {
     if (view !== 'dashboard' && view !== 'devices') {
-      // 'users' is disabled in C.1
+      // 'users' is disabled in C.1/C.2
       return;
     }
     state.currentView = view;
@@ -2172,6 +2708,23 @@
 
     // Update topbar title
     updateDynamicLabels();
+
+    // Trigger data load for the newly active view
+    if (view === 'dashboard') {
+      // ถ้ายังไม่เคยโหลด — โหลดเลย
+      if (state.devices === null || state.users === null) {
+        loadDashboard();
+      } else {
+        renderDashboardStats();  // refresh with cached
+      }
+    } else if (view === 'devices') {
+      // devices use the same cache as dashboard
+      if (state.devices === null) {
+        ensureDevicesLoaded(false);
+      } else {
+        renderDevicesList();
+      }
+    }
   }
 
   // =================================================================
@@ -2321,10 +2874,501 @@
     state.userRole = null;
     state.isAdmin = false;
     state.pendingEmail = null;
+    // Clear data caches
+    state.devices = null;
+    state.users = null;
+    state.dashboardLoadedAt = null;
     // Show login view
     showLoginView();
     showToast('safe', 'toast.logoutSuccessTitle', 'toast.logoutSuccessMessage');
   }
+
+  // =================================================================
+  // [8b] DATA LAYER (Round C.2)
+  // =================================================================
+
+  /**
+   * fetchAllDevices() — ดึง devices ทั้งหมด + normalize fields
+   */
+  async function fetchAllDevices() {
+    const { data, error } = await sb.rpc('admin_list_all_devices');
+    if (error) {
+      console.error('[data] admin_list_all_devices error:', error);
+      throw error;
+    }
+    const arr = Array.isArray(data) ? data : [];
+    // Normalize each row to a consistent shape
+    return arr.map(normalizeDevice);
+  }
+
+  /**
+   * normalizeDevice(raw) — map snake_case หรือ camelCase ให้เป็น unified shape
+   */
+  function normalizeDevice(raw) {
+    if (!raw) return null;
+    return {
+      deviceId:      getField(raw, 'device_id', 'deviceId'),
+      deviceName:    getField(raw, 'device_name', 'deviceName'),
+      clientId:      getField(raw, 'client_id', 'clientId'),
+      userId:        getField(raw, 'user_id', 'userId'),
+      ownerEmail:    getField(raw, 'owner_email', 'ownerEmail', 'email'),
+      ownerName:     getField(raw, 'owner_display_name', 'ownerDisplayName',
+                               'display_name', 'displayName'),
+      latitude:      getField(raw, 'latitude'),
+      longitude:     getField(raw, 'longitude'),
+      isPublic:      getField(raw, 'is_public', 'isPublic') === true,
+      registeredAt:  getField(raw, 'registered_at', 'registeredAt'),
+      updatedAt:     getField(raw, 'updated_at', 'updatedAt'),
+      // BEFF location fields
+      locationName:  getField(raw, 'location_name', 'locationName'),
+      photoUrl:      getField(raw, 'photo_url', 'photoUrl'),
+      category:      getField(raw, 'category'),
+      address:       getField(raw, 'address'),
+      beffEmail:     getField(raw, 'email') /* careful: may clash with owner_email */,
+      phone:         getField(raw, 'phone'),
+      website:       getField(raw, 'website'),
+      googlePlaceId: getField(raw, 'google_place_id', 'googlePlaceId'),
+      // Status (LATERAL join)
+      isOnline:      (function () {
+        const v = getField(raw, 'is_online', 'isOnline');
+        return v == null ? null : v === true;
+      })(),
+      lastSeenSeconds: (function () {
+        const v = getField(raw, 'last_seen_seconds', 'lastSeenSeconds');
+        return typeof v === 'number' ? v : null;
+      })(),
+      // Keep raw for C.3 edit modal
+      _raw: raw
+    };
+  }
+
+  /**
+   * fetchAllUsers() — ดึง users ทั้งหมด + normalize
+   */
+  async function fetchAllUsers() {
+    const { data, error } = await sb.rpc('admin_list_all_users');
+    if (error) {
+      console.error('[data] admin_list_all_users error:', error);
+      throw error;
+    }
+    const arr = Array.isArray(data) ? data : [];
+    return arr.map(normalizeUser);
+  }
+
+  function normalizeUser(raw) {
+    if (!raw) return null;
+    return {
+      id:           getField(raw, 'id', 'user_id', 'userId'),
+      email:        getField(raw, 'email'),
+      displayName:  getField(raw, 'display_name', 'displayName'),
+      role:         getField(raw, 'role'),
+      deviceCount:  getField(raw, 'device_count', 'deviceCount') || 0,
+      createdAt:    getField(raw, 'created_at', 'createdAt'),
+      lastSignInAt: getField(raw, 'last_sign_in_at', 'lastSignInAt'),
+      _raw: raw
+    };
+  }
+
+  // =================================================================
+  // [8c] DASHBOARD RENDERING (Round C.2)
+  // =================================================================
+
+  async function loadDashboard() {
+    setDashboardSkeleton();
+    try {
+      // Parallel fetch (devices + users)
+      const [devices, users] = await Promise.all([
+        fetchAllDevices().catch(e => { console.error('devices:', e); return []; }),
+        fetchAllUsers().catch(e => { console.error('users:', e); return []; })
+      ]);
+      state.devices = devices;
+      state.users = users;
+      state.dashboardLoadedAt = new Date();
+      renderDashboardStats();
+      // Update device filter counts ถ้าหน้า devices เปิดอยู่
+      if (state.currentView === 'devices') {
+        renderDevicesList();
+      }
+    } catch (e) {
+      console.error('[dashboard] load error:', e);
+      showToast('danger', 'devices.error.title', 'devices.error.description');
+      setDashboardError();
+    }
+  }
+
+  function setDashboardSkeleton() {
+    ['devices', 'users', 'photos'].forEach(k => {
+      const v = document.querySelector('[data-stat-value="' + k + '"]');
+      const s = document.querySelector('[data-stat-sub="' + k + '"]');
+      if (v) v.innerHTML = '<span class="t-skeleton big"></span>';
+      if (s) s.innerHTML = '<span class="t-skeleton line w-50"></span>';
+    });
+  }
+
+  function setDashboardError() {
+    ['devices', 'users', 'photos'].forEach(k => {
+      const v = document.querySelector('[data-stat-value="' + k + '"]');
+      const s = document.querySelector('[data-stat-sub="' + k + '"]');
+      if (v) v.textContent = '—';
+      if (s) s.textContent = '';
+    });
+    const updatedEl = document.getElementById('dashboard-updated-at');
+    if (updatedEl) updatedEl.textContent = '';
+  }
+
+  function renderDashboardStats() {
+    const devices = state.devices || [];
+    const users = state.users || [];
+
+    // Devices stat
+    const devPublic = devices.filter(d => d.isPublic).length;
+    const devPrivate = devices.length - devPublic;
+    setStatValue('devices', devices.length,
+      t('dashboard.stat.devicesSub', { publicCount: devPublic, privateCount: devPrivate }));
+
+    // Users stat
+    const adminCount = users.filter(u => u.role === 'admin' || u.role === 'super_admin').length;
+    setStatValue('users', users.length,
+      t('dashboard.stat.usersSub', { adminCount: adminCount }));
+
+    // Photos stat — count devices with photo_url pointing to our Storage bucket
+    const photoCount = devices.filter(d => {
+      const url = d.photoUrl;
+      return typeof url === 'string' && url.length > 0;
+    }).length;
+    setStatValue('photos', photoCount, t('dashboard.stat.photosSub'));
+
+    // Last updated
+    const updatedEl = document.getElementById('dashboard-updated-at');
+    if (updatedEl && state.dashboardLoadedAt) {
+      updatedEl.textContent = t('dashboard.updatedAt', { time: formatClockTime(state.dashboardLoadedAt) });
+    }
+  }
+
+  function setStatValue(key, value, subText) {
+    const valEl = document.querySelector('[data-stat-value="' + key + '"]');
+    const subEl = document.querySelector('[data-stat-sub="' + key + '"]');
+    if (valEl) {
+      valEl.classList.remove('is-placeholder');
+      valEl.textContent = String(value);
+    }
+    if (subEl) {
+      subEl.textContent = subText || '';
+    }
+  }
+
+  // =================================================================
+  // [8d] DEVICES LIST RENDERING (Round C.2)
+  // =================================================================
+
+  async function ensureDevicesLoaded(force) {
+    if (state.devicesLoading) return;
+    if (state.devices && !force) return;
+    state.devicesLoading = true;
+    try {
+      state.devices = await fetchAllDevices();
+    } catch (e) {
+      state.devices = [];
+      renderDevicesError();
+      return;
+    } finally {
+      state.devicesLoading = false;
+    }
+    renderDevicesList();
+  }
+
+  function renderDevicesList() {
+    const body = document.getElementById('devices-body');
+    const pagNode = document.getElementById('devices-pagination');
+    if (!body) return;
+
+    const all = state.devices || [];
+    // Update filter counts (total per filter)
+    updateFilterCounts(all);
+
+    // Apply search + filter
+    const filtered = applyDeviceFilters(all);
+
+    if (all.length === 0) {
+      body.innerHTML = renderEmptyState('ti-device-off', 'devices.empty.title', 'devices.empty.noData');
+      if (pagNode) pagNode.hidden = true;
+      return;
+    }
+
+    if (filtered.length === 0) {
+      body.innerHTML = renderEmptyState('ti-search-off', 'devices.empty.title', 'devices.empty.description');
+      if (pagNode) pagNode.hidden = true;
+      return;
+    }
+
+    // Pagination
+    const pageSize = state.devicePageSize;
+    const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+    if (state.devicePage > totalPages) state.devicePage = 1;
+    const startIdx = (state.devicePage - 1) * pageSize;
+    const pageRows = filtered.slice(startIdx, startIdx + pageSize);
+
+    // Render table
+    body.innerHTML = renderDeviceTable(pageRows, filtered.length, all.length);
+
+    // Render pagination ถ้ามีหลายหน้า
+    if (totalPages > 1 && pagNode) {
+      pagNode.innerHTML = renderPagination(state.devicePage, totalPages);
+      pagNode.hidden = false;
+      attachPaginationHandlers(pagNode);
+    } else if (pagNode) {
+      pagNode.hidden = true;
+      pagNode.innerHTML = '';
+    }
+  }
+
+  function renderEmptyState(iconCls, titleKey, descKey) {
+    return (
+      '<div class="t-empty">' +
+        '<div class="t-empty-icon"><i class="ti ' + iconCls + '"></i></div>' +
+        '<div class="t-empty-title">' + sanitizeHTML(t(titleKey)) + '</div>' +
+        '<div class="t-empty-description">' + sanitizeHTML(t(descKey)) + '</div>' +
+      '</div>'
+    );
+  }
+
+  function renderDevicesError() {
+    const body = document.getElementById('devices-body');
+    if (!body) return;
+    body.innerHTML =
+      '<div class="t-empty">' +
+        '<div class="t-empty-icon" style="color: var(--color-danger);"><i class="ti ti-alert-circle"></i></div>' +
+        '<div class="t-empty-title">' + sanitizeHTML(t('devices.error.title')) + '</div>' +
+        '<div class="t-empty-description">' + sanitizeHTML(t('devices.error.description')) + '</div>' +
+        '<button type="button" class="t-btn v-outline btn-sm t-mt-4" onclick="window.__adminPortal.retryLoadDevices()">' +
+          '<i class="ti ti-refresh"></i>' +
+          '<span>' + sanitizeHTML(t('common.retry')) + '</span>' +
+        '</button>' +
+      '</div>';
+  }
+
+  /**
+   * applyDeviceFilters(devices) → filtered array (search + filter chip)
+   */
+  function applyDeviceFilters(devices) {
+    const q = state.deviceSearch.trim().toLowerCase();
+    const filter = state.deviceFilter;
+
+    return devices.filter(d => {
+      // Filter chip
+      if (filter === 'public'  && !d.isPublic) return false;
+      if (filter === 'private' &&  d.isPublic) return false;
+      if (filter === 'online'  &&  d.isOnline !== true) return false;
+      if (filter === 'offline' &&  d.isOnline === true) return false;
+      // Search
+      if (q === '') return true;
+      const haystack = [
+        d.deviceId, d.deviceName, d.clientId,
+        d.ownerEmail, d.ownerName,
+        d.locationName, d.category, d.address
+      ].filter(Boolean).join(' ').toLowerCase();
+      return haystack.indexOf(q) !== -1;
+    });
+  }
+
+  function updateFilterCounts(devices) {
+    const counts = {
+      all:     devices.length,
+      public:  devices.filter(d => d.isPublic).length,
+      private: devices.filter(d => !d.isPublic).length,
+      online:  devices.filter(d => d.isOnline === true).length,
+      offline: devices.filter(d => d.isOnline === false).length
+    };
+    Object.keys(counts).forEach(key => {
+      const el = document.querySelector('[data-count="' + key + '"]');
+      if (el) el.textContent = counts[key];
+    });
+  }
+
+  /**
+   * renderDeviceTable(rows, filteredTotal, grandTotal) → HTML string
+   */
+  function renderDeviceTable(rows, filteredTotal, grandTotal) {
+    // Desktop/tablet table header
+    const head =
+      '<div class="t-table-wrap">' +
+      '<table class="t-table" role="table">' +
+        '<thead><tr>' +
+          '<th scope="col">' + sanitizeHTML(t('devices.col.device')) + '</th>' +
+          '<th scope="col">' + sanitizeHTML(t('devices.col.owner')) + '</th>' +
+          '<th scope="col">' + sanitizeHTML(t('devices.col.location')) + '</th>' +
+          '<th scope="col">' + sanitizeHTML(t('devices.col.status')) + '</th>' +
+          '<th scope="col">' + sanitizeHTML(t('devices.col.visibility')) + '</th>' +
+          '<th scope="col">' + sanitizeHTML(t('devices.col.lastSeen')) + '</th>' +
+          '<th scope="col" style="text-align:right;">' + sanitizeHTML(t('devices.col.actions')) + '</th>' +
+        '</tr></thead>' +
+      '<tbody>';
+
+    const body = rows.map(d => renderDeviceRow(d)).join('');
+
+    const footInfo =
+      '<div class="t-flex t-gap-3" style="align-items:center;justify-content:space-between;padding:var(--sp-3) var(--sp-4);border-top:1px solid var(--border-subtle);flex-wrap:wrap;">' +
+        '<span class="t-muted">' +
+          sanitizeHTML(t('devices.count', { shown: filteredTotal, total: grandTotal })) +
+        '</span>' +
+      '</div>';
+
+    return head + body + '</tbody></table></div>' + footInfo;
+  }
+
+  function renderDeviceRow(d) {
+    const devId = d.deviceId || '—';
+    const devName = d.deviceName || '—';
+    const owner = d.ownerEmail || d.ownerName || '—';
+    const loc = d.locationName || d.address || '';
+    const cat = d.category || '';
+
+    // Status cell (online/offline/unknown)
+    let statusHtml;
+    if (d.isOnline === true) {
+      statusHtml = '<span class="t-badge v-safe">' + sanitizeHTML(t('status.online')) + '</span>';
+    } else if (d.isOnline === false) {
+      statusHtml = '<span class="t-badge v-neutral">' + sanitizeHTML(t('status.offline')) + '</span>';
+    } else {
+      statusHtml = '<span class="t-badge v-neutral">' + sanitizeHTML(t('status.unknown')) + '</span>';
+    }
+
+    // Visibility badge
+    const visHtml = d.isPublic
+      ? '<span class="t-badge v-info">' + sanitizeHTML(t('status.public')) + '</span>'
+      : '<span class="t-badge v-neutral">' + sanitizeHTML(t('status.private')) + '</span>';
+
+    // Last seen
+    const lastSeenTxt = d.lastSeenSeconds != null
+      ? formatRelativeTime(d.lastSeenSeconds)
+      : (d.updatedAt ? formatRelativeTime(d.updatedAt) : t('time.never'));
+
+    // Photo thumb
+    const thumbStyle = d.photoUrl
+      ? 'background-image:url(\'' + sanitizeHTML(d.photoUrl) + '\');'
+      : '';
+    const thumbHtml = d.photoUrl
+      ? '<div class="t-table-thumb" style="' + thumbStyle + '"></div>'
+      : '<div class="t-table-thumb"><i class="ti ti-device-desktop-analytics"></i></div>';
+
+    return (
+      '<tr data-device-id="' + sanitizeHTML(devId) + '">' +
+        // Device cell
+        '<td data-label="' + sanitizeHTML(t('devices.col.device')) + '">' +
+          '<div class="t-table-row-flex">' +
+            thumbHtml +
+            '<div style="min-width:0;">' +
+              '<div class="t-table-cell-name">' + sanitizeHTML(devName) + '</div>' +
+              '<div class="t-table-cell-mono t-table-cell-sub">' + sanitizeHTML(devId) + '</div>' +
+            '</div>' +
+          '</div>' +
+        '</td>' +
+        // Owner
+        '<td data-label="' + sanitizeHTML(t('devices.col.owner')) + '">' +
+          '<div class="t-table-cell-mono" style="overflow-wrap:anywhere;">' + sanitizeHTML(owner) + '</div>' +
+        '</td>' +
+        // Location
+        '<td data-label="' + sanitizeHTML(t('devices.col.location')) + '">' +
+          (loc
+            ? ('<div>' + sanitizeHTML(loc) + '</div>' +
+               (cat ? '<div class="t-table-cell-sub">' + sanitizeHTML(cat) + '</div>' : ''))
+            : '<span class="t-muted">—</span>'
+          ) +
+        '</td>' +
+        // Status
+        '<td data-label="' + sanitizeHTML(t('devices.col.status')) + '">' + statusHtml + '</td>' +
+        // Visibility
+        '<td data-label="' + sanitizeHTML(t('devices.col.visibility')) + '">' + visHtml + '</td>' +
+        // Last seen
+        '<td data-label="' + sanitizeHTML(t('devices.col.lastSeen')) + '">' +
+          '<span class="t-mono">' + sanitizeHTML(lastSeenTxt) + '</span>' +
+        '</td>' +
+        // Actions
+        '<td data-label="' + sanitizeHTML(t('devices.col.actions')) + '" style="text-align:right;">' +
+          '<button type="button" class="t-btn v-ghost btn-sm" data-action="edit" data-device-id="' +
+            sanitizeHTML(devId) + '" title="' + sanitizeHTML(t('devices.editSoon')) + '">' +
+            '<i class="ti ti-edit"></i>' +
+          '</button>' +
+        '</td>' +
+      '</tr>'
+    );
+  }
+
+  /**
+   * renderPagination(current, total) → HTML string
+   */
+  function renderPagination(current, total) {
+    const parts = [];
+    // Prev
+    parts.push(
+      '<button type="button" class="t-page-btn" data-page="' + (current - 1) + '"' +
+        (current <= 1 ? ' disabled' : '') + ' aria-label="Previous page">' +
+        '<i class="ti ti-chevron-left"></i></button>'
+    );
+    // Page numbers (max 7 buttons, with ellipsis if needed)
+    const pagesToShow = buildPaginationList(current, total);
+    pagesToShow.forEach(p => {
+      if (p === '...') {
+        parts.push('<span class="t-page-info">…</span>');
+      } else {
+        parts.push(
+          '<button type="button" class="t-page-btn' + (p === current ? ' is-active' : '') + '" ' +
+            'data-page="' + p + '" aria-label="Page ' + p + '"' +
+            (p === current ? ' aria-current="page"' : '') + '>' + p + '</button>'
+        );
+      }
+    });
+    // Next
+    parts.push(
+      '<button type="button" class="t-page-btn" data-page="' + (current + 1) + '"' +
+        (current >= total ? ' disabled' : '') + ' aria-label="Next page">' +
+        '<i class="ti ti-chevron-right"></i></button>'
+    );
+    // Info
+    parts.push('<span class="t-page-info">' + current + ' / ' + total + '</span>');
+    return parts.join('');
+  }
+
+  function buildPaginationList(current, total) {
+    // 1 2 3 ... n-1 n OR 1 ... c-1 c c+1 ... n
+    if (total <= 7) {
+      const list = [];
+      for (let i = 1; i <= total; i++) list.push(i);
+      return list;
+    }
+    const list = [1];
+    if (current > 3) list.push('...');
+    const start = Math.max(2, current - 1);
+    const end = Math.min(total - 1, current + 1);
+    for (let i = start; i <= end; i++) list.push(i);
+    if (current < total - 2) list.push('...');
+    list.push(total);
+    return list;
+  }
+
+  function attachPaginationHandlers(root) {
+    root.querySelectorAll('.t-page-btn[data-page]').forEach(btn => {
+      btn.addEventListener('click', function () {
+        if (this.disabled) return;
+        const p = parseInt(this.getAttribute('data-page'), 10);
+        if (!isNaN(p) && p >= 1) {
+          state.devicePage = p;
+          renderDevicesList();
+          // Scroll to top of list
+          const panel = document.querySelector('#view-devices .t-table-shell');
+          if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      });
+    });
+  }
+
+  // Expose a couple of helpers to global for inline handlers (retry button)
+  window.__adminPortal = {
+    retryLoadDevices: function () {
+      state.devices = null;
+      ensureDevicesLoaded(true);
+    }
+  };
 
   // =================================================================
   // [9] VIEW TRANSITIONS
@@ -2384,6 +3428,8 @@
     // Default view = dashboard
     switchView('dashboard');
     updateDynamicLabels();
+    // Kick off first data load
+    loadDashboard();
   }
 
   // =================================================================
@@ -2646,6 +3692,85 @@
     // ESC to close sidebar drawer
     document.addEventListener('keydown', function (e) {
       if (e.key === 'Escape') closeSidebarDrawer();
+    });
+
+    // =========================================================
+    // Round C.2: Dashboard + Devices handlers
+    // =========================================================
+
+    // Dashboard refresh button
+    const btnRefreshDash = document.getElementById('btn-refresh-dashboard');
+    if (btnRefreshDash) {
+      btnRefreshDash.addEventListener('click', function () {
+        loadDashboard();
+      });
+    }
+
+    // Devices refresh button
+    const btnRefreshDev = document.getElementById('btn-refresh-devices');
+    if (btnRefreshDev) {
+      btnRefreshDev.addEventListener('click', function () {
+        state.devicePage = 1;
+        ensureDevicesLoaded(true);
+      });
+    }
+
+    // Device search input (debounced)
+    const searchInput = document.getElementById('device-search');
+    const searchWrap = document.getElementById('device-search-wrap');
+    const searchClear = document.getElementById('device-search-clear');
+    if (searchInput) {
+      let debounceTimer = null;
+      searchInput.addEventListener('input', function () {
+        state.deviceSearch = this.value || '';
+        state.devicePage = 1;  // reset to page 1 when search changes
+        if (searchWrap) {
+          searchWrap.classList.toggle('has-value', state.deviceSearch.length > 0);
+        }
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+          if (state.devices) renderDevicesList();
+        }, 200);
+      });
+    }
+    if (searchClear) {
+      searchClear.addEventListener('click', function () {
+        if (searchInput) {
+          searchInput.value = '';
+          state.deviceSearch = '';
+          state.devicePage = 1;
+          if (searchWrap) searchWrap.classList.remove('has-value');
+          if (state.devices) renderDevicesList();
+          searchInput.focus();
+        }
+      });
+    }
+
+    // Filter chips
+    document.querySelectorAll('.t-filter-chip[data-filter]').forEach(chip => {
+      chip.addEventListener('click', function () {
+        const filter = this.getAttribute('data-filter');
+        state.deviceFilter = filter;
+        state.devicePage = 1;
+        document.querySelectorAll('.t-filter-chip[data-filter]').forEach(c => {
+          c.classList.toggle('is-active', c === this);
+        });
+        if (state.devices) renderDevicesList();
+      });
+    });
+
+    // Delegated handler for Edit action button (fires toast for now — real modal in C.3)
+    document.getElementById('view-devices').addEventListener('click', function (e) {
+      const btn = e.target.closest('[data-action="edit"]');
+      if (btn) {
+        showToast('info', 'devices.editSoon', null);
+      }
+    });
+
+    // Re-render dynamic labels when language changes (time strings, counts, etc.)
+    document.addEventListener('lang-changed', function () {
+      if (state.devices) renderDevicesList();
+      if (state.dashboardLoadedAt) renderDashboardStats();
     });
 
     // Listen for Supabase auth state changes (token refresh, external logout, etc.)
