@@ -3,7 +3,7 @@
   ================================================================
   BE-TPP Admin Portal — Round C.1 (Foundation + Auth + Shell)
   ================================================================
-  Version:     v0.1.0
+  Version:     v0.1.1 (patch: fix Tabler Icons CDN URL)
   Released:    20 April 2026
   File:        be-tpp-admin.html
   Author:      Claude (AI pair programmer) + Warunyu
@@ -69,8 +69,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Rajdhani:wght@500;600;700&family=Noto+Sans+Thai:wght@400;500;600&display=swap">
 
-  <!-- Tabler Icons (webfont) — pinned version -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.5.0/tabler-icons.min.css">
+  <!-- Tabler Icons — Pinned v3.41.1 (stable, Apr 2026) — same as DS v1.3.0 -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.41.1/dist/tabler-icons.min.css">
 
   <style>
   /* ==============================================================
@@ -1645,7 +1645,7 @@
   const SUPABASE_URL = 'https://brgzimwzcfbwkgymqzvy.supabase.co';
   const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJyZ3ppbXd6Y2Zid2tneW1xenZ5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgwMzgzMDMsImV4cCI6MjA4MzYxNDMwM30.kSZCG67OlQVR_2ECFpA7uqi4TeQ1osIlngOJJ6OI5dM';
 
-  const APP_VERSION = 'v0.1.0';
+  const APP_VERSION = 'v0.1.1';
   const APP_ROUND = 'C.1';
 
   const STORAGE_KEYS = {
