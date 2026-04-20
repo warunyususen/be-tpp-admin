@@ -3,7 +3,7 @@
   ================================================================
   BE-TPP Admin Portal — Round C.1 (Foundation + Auth + Shell)
   ================================================================
-  Version:     v0.2.0 (Round C.2 — Dashboard + Device List)
+  Version:     v0.2.1 (patch: Bug #1 refresh feedback, Bug #2 actions align, Bug #3 owner/lastseen wrap)
   Released:    20 April 2026
   File:        be-tpp-admin.html
   Author:      Claude (AI pair programmer) + Warunyu
@@ -1233,6 +1233,27 @@
     gap: var(--sp-3);
   }
 
+  /* Bug#2 fix: Actions column — right-aligned header + cell on desktop/tablet */
+  .t-table th.t-cell-actions,
+  .t-table td.t-cell-actions {
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  /* Bug#3 fix: Owner cell — break only at word boundary, not mid-character */
+  .t-cell-owner {
+    overflow-wrap: break-word;  /* word-boundary break */
+    word-break: break-word;      /* fallback */
+    min-width: 140px;
+    max-width: 220px;
+    line-height: 1.35;
+  }
+
+  /* Bug#3 fix: Last-seen cell — no line break */
+  .t-cell-lastseen {
+    white-space: nowrap;
+  }
+
   /* ==============================================================
      [16b] SEARCH BAR (Round C.2)
      ============================================================== */
@@ -1628,8 +1649,14 @@
       font-weight: 600;
       flex-shrink: 0;
       min-width: 90px;
+      text-align: left;           /* Bug#2 fix: ::before label ชิดซ้ายเสมอ ไม่ตามที่ td text-align */
     }
     .t-table-row-flex { justify-content: flex-end; }
+    /* Bug#2 fix: Actions cell on mobile — value ชิดขวา, ไม่มี inline text-align inheritance */
+    .t-table tbody td.t-cell-actions {
+      text-align: left;           /* reset จาก desktop inline style */
+      justify-content: space-between;
+    }
 
     .t-toolbar { flex-direction: column; align-items: stretch; }
     .t-toolbar-right { margin-left: 0; justify-content: flex-end; }
@@ -1969,6 +1996,7 @@
               </div>
 
               <div class="t-toolbar-right">
+                <span class="t-muted" id="devices-updated-at">&nbsp;</span>
                 <button type="button" class="t-btn v-ghost btn-sm" id="btn-refresh-devices">
                   <i class="ti ti-refresh"></i>
                   <span data-i18n="common.refresh">Refresh</span>
@@ -2011,8 +2039,8 @@
   const SUPABASE_URL = 'https://brgzimwzcfbwkgymqzvy.supabase.co';
   const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJyZ3ppbXd6Y2Zid2tneW1xenZ5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgwMzgzMDMsImV4cCI6MjA4MzYxNDMwM30.kSZCG67OlQVR_2ECFpA7uqi4TeQ1osIlngOJJ6OI5dM';
 
-  const APP_VERSION = 'v0.2.0';
-  const APP_ROUND = 'C.2';
+  const APP_VERSION = 'v0.2.1';
+  const APP_ROUND = 'C.2-patch';
 
   const STORAGE_KEYS = {
     lang:  'be-tpp-admin.lang',
@@ -2053,7 +2081,8 @@
     devicePage:     1,            // current page (1-indexed)
     devicePageSize: 20,
     // Last-loaded timestamps
-    dashboardLoadedAt: null
+    dashboardLoadedAt: null,
+    devicesLoadedAt:   null   // Bug#1 fix: track device list refresh time
   };
 
   // =================================================================
@@ -2076,6 +2105,7 @@
       'common.error': 'Error',
       'common.success': 'Success',
       'common.refresh': 'Refresh',
+      'common.refreshing': 'Refreshing...',
       'common.search': 'Search',
       'common.clear': 'Clear',
       'common.retry': 'Retry',
@@ -2206,6 +2236,7 @@
       'common.error': 'ข้อผิดพลาด',
       'common.success': 'สำเร็จ',
       'common.refresh': 'รีเฟรช',
+      'common.refreshing': 'กำลังรีเฟรช...',
       'common.search': 'ค้นหา',
       'common.clear': 'ล้าง',
       'common.retry': 'ลองใหม่',
@@ -3063,10 +3094,14 @@
 
   async function ensureDevicesLoaded(force) {
     if (state.devicesLoading) return;
-    if (state.devices && !force) return;
+    if (state.devices && !force) {
+      updateDevicesUpdatedLabel();  // show existing timestamp if any
+      return;
+    }
     state.devicesLoading = true;
     try {
       state.devices = await fetchAllDevices();
+      state.devicesLoadedAt = new Date();
     } catch (e) {
       state.devices = [];
       renderDevicesError();
@@ -3075,6 +3110,36 @@
       state.devicesLoading = false;
     }
     renderDevicesList();
+    updateDevicesUpdatedLabel();
+  }
+
+  /**
+   * ensureDevicesLoadedAsync — same as ensureDevicesLoaded but awaitable
+   * Bug#1 fix: caller (refresh button) ต้องการรอให้ load เสร็จก่อนคืน spinner
+   */
+  async function ensureDevicesLoadedAsync(force) {
+    // If already loading, spin until the existing load finishes (simple poll)
+    if (state.devicesLoading) {
+      return new Promise(resolve => {
+        const iv = setInterval(() => {
+          if (!state.devicesLoading) { clearInterval(iv); resolve(); }
+        }, 50);
+      });
+    }
+    return ensureDevicesLoaded(force);
+  }
+
+  /**
+   * updateDevicesUpdatedLabel() — Bug#1 fix: แสดงเวลา refresh ล่าสุดข้างปุ่ม
+   */
+  function updateDevicesUpdatedLabel() {
+    const el = document.getElementById('devices-updated-at');
+    if (!el) return;
+    if (state.devicesLoadedAt) {
+      el.textContent = t('dashboard.updatedAt', { time: formatClockTime(state.devicesLoadedAt) });
+    } else {
+      el.textContent = '';
+    }
   }
 
   function renderDevicesList() {
@@ -3200,7 +3265,7 @@
           '<th scope="col">' + sanitizeHTML(t('devices.col.status')) + '</th>' +
           '<th scope="col">' + sanitizeHTML(t('devices.col.visibility')) + '</th>' +
           '<th scope="col">' + sanitizeHTML(t('devices.col.lastSeen')) + '</th>' +
-          '<th scope="col" style="text-align:right;">' + sanitizeHTML(t('devices.col.actions')) + '</th>' +
+          '<th scope="col" class="t-cell-actions">' + sanitizeHTML(t('devices.col.actions')) + '</th>' +
         '</tr></thead>' +
       '<tbody>';
 
@@ -3219,7 +3284,21 @@
   function renderDeviceRow(d) {
     const devId = d.deviceId || '—';
     const devName = d.deviceName || '—';
-    const owner = d.ownerEmail || d.ownerName || '—';
+    // Bug#3 bonus: Owner cell — show name + email compactly
+    const ownerName = d.ownerName || '';
+    const ownerEmail = d.ownerEmail || '';
+    let ownerHtml;
+    if (ownerName && ownerEmail && ownerName !== ownerEmail) {
+      ownerHtml =
+        '<div class="t-table-cell-name">' + sanitizeHTML(ownerName) + '</div>' +
+        '<div class="t-table-cell-mono t-table-cell-sub">' + sanitizeHTML(ownerEmail) + '</div>';
+    } else if (ownerEmail) {
+      ownerHtml = '<div class="t-table-cell-mono">' + sanitizeHTML(ownerEmail) + '</div>';
+    } else if (ownerName) {
+      ownerHtml = '<div>' + sanitizeHTML(ownerName) + '</div>';
+    } else {
+      ownerHtml = '<span class="t-muted">—</span>';
+    }
     const loc = d.locationName || d.address || '';
     const cat = d.category || '';
 
@@ -3265,7 +3344,7 @@
         '</td>' +
         // Owner
         '<td data-label="' + sanitizeHTML(t('devices.col.owner')) + '">' +
-          '<div class="t-table-cell-mono" style="overflow-wrap:anywhere;">' + sanitizeHTML(owner) + '</div>' +
+          '<div class="t-cell-owner">' + ownerHtml + '</div>' +
         '</td>' +
         // Location
         '<td data-label="' + sanitizeHTML(t('devices.col.location')) + '">' +
@@ -3281,10 +3360,10 @@
         '<td data-label="' + sanitizeHTML(t('devices.col.visibility')) + '">' + visHtml + '</td>' +
         // Last seen
         '<td data-label="' + sanitizeHTML(t('devices.col.lastSeen')) + '">' +
-          '<span class="t-mono">' + sanitizeHTML(lastSeenTxt) + '</span>' +
+          '<span class="t-mono t-cell-lastseen">' + sanitizeHTML(lastSeenTxt) + '</span>' +
         '</td>' +
         // Actions
-        '<td data-label="' + sanitizeHTML(t('devices.col.actions')) + '" style="text-align:right;">' +
+        '<td data-label="' + sanitizeHTML(t('devices.col.actions')) + '" class="t-cell-actions">' +
           '<button type="button" class="t-btn v-ghost btn-sm" data-action="edit" data-device-id="' +
             sanitizeHTML(devId) + '" title="' + sanitizeHTML(t('devices.editSoon')) + '">' +
             '<i class="ti ti-edit"></i>' +
@@ -3701,17 +3780,34 @@
     // Dashboard refresh button
     const btnRefreshDash = document.getElementById('btn-refresh-dashboard');
     if (btnRefreshDash) {
-      btnRefreshDash.addEventListener('click', function () {
-        loadDashboard();
+      btnRefreshDash.addEventListener('click', async function () {
+        setButtonLoading(btnRefreshDash, true, 'common.refreshing');
+        const started = Date.now();
+        try {
+          await loadDashboard();
+        } finally {
+          // Min 400ms so the spinner is visible even if RPC returns instantly
+          const elapsed = Date.now() - started;
+          const wait = Math.max(0, 400 - elapsed);
+          setTimeout(() => setButtonLoading(btnRefreshDash, false), wait);
+        }
       });
     }
 
-    // Devices refresh button
+    // Devices refresh button — Bug#1 fix: add spinner + min-duration + toast
     const btnRefreshDev = document.getElementById('btn-refresh-devices');
     if (btnRefreshDev) {
-      btnRefreshDev.addEventListener('click', function () {
+      btnRefreshDev.addEventListener('click', async function () {
+        setButtonLoading(btnRefreshDev, true, 'common.refreshing');
+        const started = Date.now();
         state.devicePage = 1;
-        ensureDevicesLoaded(true);
+        try {
+          await ensureDevicesLoadedAsync(true);
+        } finally {
+          const elapsed = Date.now() - started;
+          const wait = Math.max(0, 400 - elapsed);
+          setTimeout(() => setButtonLoading(btnRefreshDev, false), wait);
+        }
       });
     }
 
