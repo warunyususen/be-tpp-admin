@@ -1,0 +1,2692 @@
+<!DOCTYPE html>
+<!--
+  ================================================================
+  BE-TPP Admin Portal — Round C.1 (Foundation + Auth + Shell)
+  ================================================================
+  Version:     v0.1.0
+  Released:    20 April 2026
+  File:        be-tpp-admin.html
+  Author:      Claude (AI pair programmer) + Warunyu
+  Purpose:     Admin portal for Breatheeazy BE-TPP system
+  Target:      Hugh (owner, British) + Tarn (admin helper)
+  Backend:     Supabase brgzimwzcfbwkgymqzvy (Mumbai AWS, FREE)
+  DS:          Tactical-Lite v1.3.0 (selective copy)
+
+  --- Round C.1 Scope ---
+  [A] App shell + sidebar + topbar (responsive 3 viewports)
+  [B] Email OTP authentication (2-step: email -> code)
+  [C] Admin guard (is_admin() RPC check)
+  [D] Logout flow
+  [E] i18n foundation (TH/EN toggle + localStorage persist)
+  [F] Empty Dashboard placeholder (full impl in C.2)
+  [G] Toast + loading patterns
+
+  --- Not in C.1 (coming later) ---
+  C.2: Dashboard stats, Device list
+  C.3: Edit device modal, Photo upload
+  C.4: PWA wrapper (manifest, service worker)
+  Round D: User management UI
+
+  --- Code Style ---
+  - Single HTML file (CSS/JS inline)
+  - Thai comments in code; technical terms in English
+  - sanitizeHTML() used on every innerHTML render
+  - Supports JSON both snake_case and camelCase
+  ================================================================
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1520">
+  <meta name="color-scheme" content="dark light">
+  <meta name="description" content="BE-TPP Admin Portal — Device and user management for Breatheeazy">
+
+  <!-- PWA meta tags (actual manifest/sw in Round C.4) -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="BE-TPP Admin">
+
+  <title>BE-TPP Admin Portal</title>
+
+  <!-- Anti-FOUC theme script — run before CSS applies -->
+  <script>
+    (function () {
+      try {
+        var saved = localStorage.getItem('be-tpp-admin.theme');
+        var pref = (saved === 'light' || saved === 'dark')
+          ? saved
+          : (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+        document.documentElement.setAttribute('data-theme', pref);
+      } catch (_) {
+        document.documentElement.setAttribute('data-theme', 'dark');
+      }
+    })();
+  </script>
+
+  <!-- Fonts: Inter (body) + JetBrains Mono (IDs) + Rajdhani (display) + Noto Sans Thai -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Rajdhani:wght@500;600;700&family=Noto+Sans+Thai:wght@400;500;600&display=swap">
+
+  <!-- Tabler Icons (webfont) — pinned version -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.5.0/tabler-icons.min.css">
+
+  <style>
+  /* ==============================================================
+     [1] DESIGN TOKENS (from Tactical-Lite v1.3.0)
+     ============================================================== */
+  :root {
+    /* Backgrounds (dark default) */
+    --bg-base:          #0f1520;
+    --bg-surface:       #161d2c;
+    --bg-surface-hover: #1c2538;
+    --bg-panel:         #141b28;
+    --bg-panel-glass:   rgba(20, 27, 40, 0.88);
+    --bg-overlay:       rgba(6, 10, 20, 0.72);
+    --bg-input:         #0f1520;
+
+    /* Sky-blue primary */
+    --color-primary:       #38bdf8;
+    --color-primary-hover: #7dd3fc;
+    --color-primary-dim:   rgba(56, 189, 248, 0.10);
+    --color-primary-mid:   rgba(56, 189, 248, 0.22);
+    --color-primary-border:rgba(56, 189, 248, 0.40);
+
+    /* Secondary (barely used) */
+    --color-secondary:     #8b5cf6;
+    --color-secondary-dim: rgba(139, 92, 246, 0.12);
+
+    /* Semantic */
+    --color-safe:          #22c55e;
+    --color-safe-dim:      rgba(34, 197, 94, 0.12);
+    --color-safe-border:   rgba(34, 197, 94, 0.30);
+    --color-warning:       #f59e0b;
+    --color-warning-dim:   rgba(245, 158, 11, 0.12);
+    --color-warning-border:rgba(245, 158, 11, 0.30);
+    --color-danger:        #ef4444;
+    --color-danger-dim:    rgba(239, 68, 68, 0.12);
+    --color-danger-border: rgba(239, 68, 68, 0.30);
+    --color-info:          #60a5fa;
+    --color-info-dim:      rgba(96, 165, 250, 0.12);
+    --color-info-border:   rgba(96, 165, 250, 0.30);
+
+    /* Text */
+    --text-high:    #f1f5f9;
+    --text-medium:  #cbd5e1;
+    --text-low:     #94a3b8;
+    --text-subtle:  #64748b;
+    --text-inverse: #0f1520;
+
+    /* Borders */
+    --border-default: rgba(255, 255, 255, 0.08);
+    --border-strong:  rgba(255, 255, 255, 0.14);
+    --border-subtle:  rgba(255, 255, 255, 0.04);
+
+    /* Typography */
+    --font-sans:    'Inter', 'Noto Sans Thai', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    --font-mono:    'JetBrains Mono', 'Courier New', ui-monospace, monospace;
+    --font-display: 'Rajdhani', 'Noto Sans Thai', var(--font-sans);
+
+    /* Type scale */
+    --text-2xs: 0.6875rem;
+    --text-xs:  0.75rem;
+    --text-sm:  0.8125rem;
+    --text-base:0.9375rem;
+    --text-md:  1rem;
+    --text-lg:  1.125rem;
+    --text-xl:  1.25rem;
+    --text-2xl: 1.5rem;
+    --text-3xl: 1.875rem;
+    --text-4xl: 2.25rem;
+
+    --leading-tight:  1.25;
+    --leading-snug:   1.4;
+    --leading-normal: 1.55;
+    --leading-loose:  1.7;
+
+    --tracking-tight: -0.01em;
+    --tracking-normal: 0;
+    --tracking-wide:   0.04em;
+    --tracking-wider:  0.08em;
+    --tracking-widest: 0.14em;
+
+    /* Spacing (4px grid) */
+    --sp-1:  4px;  --sp-2:  8px;  --sp-3:  12px; --sp-4:  16px;
+    --sp-5:  20px; --sp-6:  24px; --sp-8:  32px; --sp-10: 40px;
+    --sp-12: 48px; --sp-16: 64px; --sp-20: 80px;
+
+    /* Radius */
+    --r-xs: 2px; --r-sm: 6px; --r-md: 8px; --r-lg: 12px;
+    --r-xl: 16px; --r-full: 9999px;
+
+    /* Shadows + focus */
+    --shadow-sm:    0 1px 3px rgba(0,0,0,0.25);
+    --shadow-md:    0 4px 12px rgba(0,0,0,0.32);
+    --shadow-lg:    0 12px 32px rgba(0,0,0,0.40);
+    --shadow-panel: 0 1px 2px rgba(0,0,0,0.20), 0 8px 24px rgba(0,0,0,0.28);
+    --focus-ring:   0 0 0 3px rgba(56, 189, 248, 0.35);
+    --glow-primary: 0 0 16px rgba(56, 189, 248, 0.28);
+
+    /* Effects */
+    --blur-panel: blur(10px);
+    --blur-overlay: blur(6px);
+
+    /* Animation */
+    --dur-fast:   140ms;
+    --dur-normal: 240ms;
+    --dur-slow:   400ms;
+    --ease-std:   cubic-bezier(0.4, 0, 0.2, 1);
+    --ease-out:   cubic-bezier(0, 0, 0.2, 1);
+    --ease-in:    cubic-bezier(0.4, 0, 1, 1);
+    --ease-spring:cubic-bezier(0.34, 1.56, 0.64, 1);
+
+    /* Z-index */
+    --z-base: 0;     --z-raised: 10;  --z-sticky: 50;
+    --z-overlay: 100;--z-drawer: 200; --z-modal: 300;
+    --z-toast: 400;  --z-tooltip: 500;
+
+    /* Layout */
+    --sidebar-width: 244px;
+    --topbar-height: 56px;
+    --content-max:   1440px;
+  }
+
+  /* Light mode — professional */
+  [data-theme="light"] {
+    --bg-base:          #f8fafc;
+    --bg-surface:       #ffffff;
+    --bg-surface-hover: #f1f5f9;
+    --bg-panel:         #ffffff;
+    --bg-panel-glass:   rgba(255, 255, 255, 0.94);
+    --bg-overlay:       rgba(15, 23, 42, 0.50);
+    --bg-input:         #ffffff;
+
+    --color-primary:       #0284c7;
+    --color-primary-hover: #0369a1;
+    --color-primary-dim:   rgba(2, 132, 199, 0.08);
+    --color-primary-mid:   rgba(2, 132, 199, 0.16);
+    --color-primary-border:rgba(2, 132, 199, 0.36);
+
+    --color-secondary:    #7c3aed;
+    --color-secondary-dim:rgba(124, 58, 237, 0.10);
+
+    --color-safe:    #16a34a;
+    --color-safe-dim:rgba(22, 163, 74, 0.10);
+    --color-safe-border:rgba(22, 163, 74, 0.30);
+    --color-warning: #d97706;
+    --color-warning-dim:rgba(217, 119, 6, 0.10);
+    --color-warning-border:rgba(217, 119, 6, 0.30);
+    --color-danger:  #dc2626;
+    --color-danger-dim:rgba(220, 38, 38, 0.10);
+    --color-danger-border:rgba(220, 38, 38, 0.30);
+    --color-info:    #2563eb;
+    --color-info-dim:rgba(37, 99, 235, 0.10);
+    --color-info-border:rgba(37, 99, 235, 0.30);
+
+    --text-high:    #0f172a;
+    --text-medium:  #334155;
+    --text-low:     #64748b;
+    --text-subtle:  #94a3b8;
+    --text-inverse: #ffffff;
+
+    --border-default: rgba(15, 23, 42, 0.10);
+    --border-strong:  rgba(15, 23, 42, 0.18);
+    --border-subtle:  rgba(15, 23, 42, 0.05);
+
+    --shadow-sm:    0 1px 2px rgba(15,23,42,0.06);
+    --shadow-md:    0 4px 12px rgba(15,23,42,0.10);
+    --shadow-lg:    0 12px 32px rgba(15,23,42,0.14);
+    --shadow-panel: 0 1px 2px rgba(15,23,42,0.04), 0 4px 16px rgba(15,23,42,0.08);
+
+    --focus-ring:   0 0 0 3px rgba(2, 132, 199, 0.28);
+    --glow-primary: 0 0 12px rgba(2, 132, 199, 0.20);
+  }
+
+  /* ==============================================================
+     [2] GLOBAL RESET & BASE
+     ============================================================== */
+  *, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    font-size: 16px;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--bg-base);
+    color: var(--text-high);
+    font-family: var(--font-sans);
+    font-size: var(--text-base);
+    line-height: var(--leading-normal);
+    min-height: 100vh;
+    min-height: 100dvh; /* dynamic viewport for mobile */
+  }
+
+  [hidden] { display: none !important; }
+
+  a { color: var(--color-primary); text-decoration: none; }
+  a:hover { color: var(--color-primary-hover); }
+
+  button { font-family: inherit; }
+
+  /* Tabler icon base — centralised alignment */
+  .ti {
+    display: inline-flex;
+    align-items: center;
+    line-height: 1;
+  }
+
+  /* Screen reader only */
+  .sr-only {
+    position: absolute !important;
+    width: 1px !important; height: 1px !important;
+    padding: 0 !important; margin: -1px !important;
+    overflow: hidden !important; clip: rect(0,0,0,0) !important;
+    white-space: nowrap !important; border: 0 !important;
+  }
+
+  /* Skip link (a11y) */
+  .skip-link {
+    position: absolute;
+    top: -40px; left: 8px;
+    padding: 8px 16px;
+    background: var(--color-primary);
+    color: var(--text-inverse);
+    border-radius: var(--r-md);
+    font-weight: 600;
+    z-index: var(--z-tooltip);
+    transition: top var(--dur-fast) var(--ease-std);
+  }
+  .skip-link:focus { top: 8px; }
+
+  /* Focus-visible global */
+  :focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 3px;
+    border-radius: var(--r-xs);
+  }
+
+  /* ==============================================================
+     [3] CUSTOM SCROLLBAR
+     ============================================================== */
+  *::-webkit-scrollbar { width: 5px; height: 5px; }
+  *::-webkit-scrollbar-track { background: transparent; }
+  *::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: var(--r-full);
+  }
+  *::-webkit-scrollbar-thumb:hover { background: var(--color-primary); }
+  * { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+
+  /* ==============================================================
+     [4] APP SHELL LAYOUT
+     ============================================================== */
+  .t-app-shell {
+    display: flex;
+    min-height: 100vh;
+    min-height: 100dvh;
+    position: relative;
+  }
+
+  .app-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    overflow-x: hidden; /* contains horizontal overflow, not on html/body */
+  }
+
+  .content-area {
+    flex: 1;
+    padding: var(--sp-6) var(--sp-8);
+    max-width: var(--content-max);
+    width: 100%;
+    margin: 0 auto;
+  }
+
+  @media (max-width: 900px) {
+    .content-area { padding: var(--sp-5); }
+  }
+
+  /* ==============================================================
+     [5] SIDEBAR & NAVIGATION
+     ============================================================== */
+  .t-sidebar {
+    width: var(--sidebar-width);
+    min-width: var(--sidebar-width);
+    background: var(--bg-panel);
+    border-right: 1px solid var(--border-default);
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    height: 100dvh;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    z-index: var(--z-drawer);
+    transition: transform var(--dur-normal) var(--ease-std);
+  }
+
+  .t-sidebar-header {
+    padding: var(--sp-5) var(--sp-5) var(--sp-4);
+    border-bottom: 1px solid var(--border-subtle);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: var(--topbar-height);
+  }
+
+  .t-sidebar-brand {
+    font-family: var(--font-display);
+    font-size: var(--text-lg);
+    font-weight: 700;
+    color: var(--text-high);
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    display: flex;
+    align-items: baseline;
+    gap: var(--sp-2);
+  }
+
+  .t-sidebar-brand-accent { color: var(--color-primary); }
+
+  .t-sidebar-brand-sub {
+    font-family: var(--font-mono);
+    font-size: var(--text-2xs);
+    color: var(--text-subtle);
+    letter-spacing: var(--tracking-wide);
+    font-weight: 500;
+    text-transform: uppercase;
+  }
+
+  .t-sidebar-close-btn {
+    display: none;
+    background: none;
+    border: 1px solid var(--border-default);
+    border-radius: var(--r-sm);
+    color: var(--text-low);
+    padding: 6px;
+    cursor: pointer;
+    transition: all var(--dur-fast) var(--ease-std);
+  }
+  .t-sidebar-close-btn:hover {
+    color: var(--text-high);
+    border-color: var(--border-strong);
+  }
+
+  .t-sidebar-nav { padding: var(--sp-4) 0; flex: 1; }
+
+  .t-nav-group + .t-nav-group { margin-top: var(--sp-4); }
+
+  .t-nav-group-label {
+    font-family: var(--font-display);
+    font-size: var(--text-2xs);
+    color: var(--text-subtle);
+    letter-spacing: var(--tracking-widest);
+    text-transform: uppercase;
+    padding: var(--sp-2) var(--sp-5);
+    font-weight: 600;
+  }
+
+  .t-nav-item {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    padding: var(--sp-2) var(--sp-5);
+    color: var(--text-medium);
+    font-size: var(--text-sm);
+    font-weight: 500;
+    cursor: pointer;
+    transition: all var(--dur-fast) var(--ease-std);
+    border: none;
+    background: none;
+    width: 100%;
+    text-align: left;
+    position: relative;
+  }
+
+  .t-nav-item::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 3px;
+    background: transparent;
+    transition: background var(--dur-fast) var(--ease-std);
+  }
+
+  .t-nav-item i { font-size: 18px; flex-shrink: 0; opacity: 0.75; }
+
+  .t-nav-item:hover:not(.is-disabled) {
+    color: var(--text-high);
+    background: var(--bg-surface-hover);
+  }
+  .t-nav-item:hover:not(.is-disabled) i { opacity: 1; }
+
+  .t-nav-item.is-active {
+    color: var(--color-primary);
+    background: var(--color-primary-dim);
+    font-weight: 600;
+  }
+  .t-nav-item.is-active i { opacity: 1; color: var(--color-primary); }
+  .t-nav-item.is-active::before { background: var(--color-primary); }
+
+  .t-nav-item.is-disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .t-nav-item-badge {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: var(--text-2xs);
+    padding: 1px 7px;
+    border-radius: var(--r-full);
+    background: var(--border-default);
+    color: var(--text-low);
+    font-weight: 600;
+  }
+
+  /* Sidebar footer — user info */
+  .t-sidebar-footer {
+    padding: var(--sp-3) var(--sp-5);
+    border-top: 1px solid var(--border-subtle);
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+  }
+
+  .t-sidebar-footer-avatar {
+    width: 32px; height: 32px;
+    border-radius: var(--r-full);
+    background: var(--color-primary-dim);
+    color: var(--color-primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    font-size: var(--text-sm);
+    flex-shrink: 0;
+  }
+
+  .t-sidebar-footer-info { min-width: 0; flex: 1; }
+  .t-sidebar-footer-name {
+    font-size: var(--text-sm);
+    color: var(--text-high);
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .t-sidebar-footer-role {
+    font-family: var(--font-mono);
+    font-size: var(--text-2xs);
+    color: var(--text-subtle);
+    letter-spacing: var(--tracking-wide);
+    text-transform: uppercase;
+  }
+
+  /* Sidebar overlay (mobile only) */
+  .t-sidebar-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: var(--bg-overlay);
+    z-index: calc(var(--z-drawer) - 1);
+    backdrop-filter: var(--blur-overlay);
+    -webkit-backdrop-filter: var(--blur-overlay);
+  }
+
+  /* ==============================================================
+     [6] TOPBAR
+     ============================================================== */
+  .t-topbar {
+    height: var(--topbar-height);
+    background: var(--bg-panel);
+    border-bottom: 1px solid var(--border-default);
+    padding: 0 var(--sp-6);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-4);
+    position: sticky;
+    top: 0;
+    z-index: var(--z-sticky);
+    backdrop-filter: var(--blur-panel);
+    -webkit-backdrop-filter: var(--blur-panel);
+  }
+
+  .t-topbar-left {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    min-width: 0;
+    flex: 1;
+  }
+
+  .t-topbar-hamburger {
+    display: none;
+    background: none;
+    border: 1px solid var(--border-default);
+    border-radius: var(--r-sm);
+    padding: 6px;
+    cursor: pointer;
+    color: var(--text-medium);
+    transition: all var(--dur-fast) var(--ease-std);
+  }
+  .t-topbar-hamburger:hover {
+    color: var(--text-high);
+    border-color: var(--border-strong);
+  }
+
+  .t-topbar-title {
+    font-family: var(--font-display);
+    font-size: var(--text-xl);
+    font-weight: 600;
+    color: var(--text-high);
+    letter-spacing: var(--tracking-tight);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .t-topbar-right {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+  }
+
+  .t-topbar-btn {
+    width: 36px; height: 36px;
+    border: 1px solid var(--border-default);
+    background: transparent;
+    color: var(--text-medium);
+    border-radius: var(--r-sm);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all var(--dur-fast) var(--ease-std);
+    position: relative;
+  }
+  .t-topbar-btn:hover {
+    color: var(--color-primary);
+    border-color: var(--color-primary-border);
+    background: var(--color-primary-dim);
+  }
+  .t-topbar-btn i { font-size: 18px; }
+
+  /* Topbar pill (lang/theme toggle) */
+  .t-topbar-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border: 1px solid var(--border-default);
+    border-radius: var(--r-full);
+    padding: 3px;
+    background: var(--bg-surface);
+  }
+  .t-topbar-pill button {
+    border: none;
+    background: transparent;
+    color: var(--text-low);
+    font-family: var(--font-mono);
+    font-size: var(--text-2xs);
+    font-weight: 600;
+    letter-spacing: var(--tracking-wide);
+    padding: 4px 10px;
+    border-radius: var(--r-full);
+    cursor: pointer;
+    transition: all var(--dur-fast) var(--ease-std);
+    text-transform: uppercase;
+  }
+  .t-topbar-pill button.is-active {
+    background: var(--color-primary);
+    color: var(--text-inverse);
+  }
+  .t-topbar-pill button:not(.is-active):hover { color: var(--text-high); }
+
+  /* ==============================================================
+     [7] PANELS
+     ============================================================== */
+  .t-panel {
+    background: var(--bg-panel);
+    border: 1px solid var(--border-default);
+    border-radius: var(--r-lg);
+    overflow: hidden;
+  }
+
+  .t-panel-header {
+    padding: var(--sp-4) var(--sp-5);
+    border-bottom: 1px solid var(--border-subtle);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-3);
+    flex-wrap: wrap;
+  }
+
+  .t-panel-title {
+    font-family: var(--font-display);
+    font-size: var(--text-lg);
+    font-weight: 600;
+    color: var(--text-high);
+    letter-spacing: var(--tracking-tight);
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+  }
+  .t-panel-title i { color: var(--color-primary); font-size: 20px; }
+
+  .t-panel-subtitle {
+    font-size: var(--text-sm);
+    color: var(--text-low);
+    margin-top: 2px;
+  }
+
+  .t-panel-body { padding: var(--sp-5); }
+
+  /* ==============================================================
+     [8] BUTTONS
+     ============================================================== */
+  .t-btn {
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    font-weight: 500;
+    padding: 8px 16px;
+    cursor: pointer;
+    border-radius: var(--r-md);
+    border: 1px solid transparent;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--sp-2);
+    transition: all var(--dur-fast) var(--ease-std);
+    white-space: nowrap;
+    text-decoration: none;
+    line-height: 1.2;
+    vertical-align: middle;
+    user-select: none;
+  }
+
+  .t-btn i { font-size: 16px; }
+
+  .t-btn:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+  }
+
+  .t-btn.btn-sm { padding: 6px 12px; font-size: var(--text-xs); gap: 6px; }
+  .t-btn.btn-sm i { font-size: 14px; }
+  .t-btn.btn-lg { padding: 11px 22px; font-size: var(--text-base); }
+  .t-btn.btn-lg i { font-size: 18px; }
+  .t-btn.btn-full { width: 100%; }
+
+  .t-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+
+  /* Primary — solid */
+  .t-btn.v-primary {
+    background: var(--color-primary);
+    color: var(--text-inverse);
+    border-color: var(--color-primary);
+    font-weight: 600;
+  }
+  .t-btn.v-primary:not(:disabled):hover {
+    background: var(--color-primary-hover);
+    border-color: var(--color-primary-hover);
+    box-shadow: var(--glow-primary);
+  }
+
+  /* Outline */
+  .t-btn.v-outline {
+    background: transparent;
+    color: var(--color-primary);
+    border-color: var(--color-primary-border);
+  }
+  .t-btn.v-outline:not(:disabled):hover {
+    background: var(--color-primary-dim);
+    border-color: var(--color-primary);
+  }
+
+  /* Ghost */
+  .t-btn.v-ghost {
+    background: transparent;
+    color: var(--text-medium);
+    border-color: var(--border-default);
+  }
+  .t-btn.v-ghost:not(:disabled):hover {
+    color: var(--text-high);
+    background: var(--bg-surface-hover);
+    border-color: var(--border-strong);
+  }
+
+  /* Subtle */
+  .t-btn.v-subtle {
+    background: var(--bg-surface-hover);
+    color: var(--text-medium);
+    border-color: transparent;
+  }
+  .t-btn.v-subtle:not(:disabled):hover {
+    background: var(--border-default);
+    color: var(--text-high);
+  }
+
+  /* Danger */
+  .t-btn.v-danger {
+    background: var(--color-danger);
+    color: #ffffff;
+    border-color: var(--color-danger);
+    font-weight: 600;
+  }
+  .t-btn.v-danger:not(:disabled):hover {
+    filter: brightness(1.1);
+  }
+
+  /* ==============================================================
+     [9] BADGES & STATUS
+     ============================================================== */
+  .t-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: var(--r-full);
+    font-size: var(--text-2xs);
+    font-weight: 600;
+    letter-spacing: var(--tracking-wide);
+    text-transform: uppercase;
+    border: 1px solid transparent;
+  }
+  .t-badge.v-primary { background: var(--color-primary-dim); color: var(--color-primary); border-color: var(--color-primary-border); }
+  .t-badge.v-safe    { background: var(--color-safe-dim);    color: var(--color-safe);    border-color: var(--color-safe-border); }
+  .t-badge.v-warning { background: var(--color-warning-dim); color: var(--color-warning); border-color: var(--color-warning-border); }
+  .t-badge.v-danger  { background: var(--color-danger-dim);  color: var(--color-danger);  border-color: var(--color-danger-border); }
+  .t-badge.v-info    { background: var(--color-info-dim);    color: var(--color-info);    border-color: var(--color-info-border); }
+  .t-badge.v-neutral { background: var(--bg-surface);        color: var(--text-medium);   border-color: var(--border-default); }
+  .t-badge.v-mono    {
+    font-family: var(--font-mono);
+    text-transform: none;
+    letter-spacing: var(--tracking-tight);
+    background: var(--bg-surface);
+    color: var(--text-medium);
+    border-color: var(--border-default);
+  }
+
+  /* ==============================================================
+     [10] FORM INPUTS
+     ============================================================== */
+  .t-label {
+    display: block;
+    font-size: var(--text-xs);
+    color: var(--text-medium);
+    font-weight: 500;
+    margin-bottom: 6px;
+    user-select: none;
+  }
+  .t-label .required { color: var(--color-danger); margin-left: 2px; }
+
+  .t-input,
+  .t-select,
+  .t-textarea {
+    width: 100%;
+    background: var(--bg-input);
+    border: 1px solid var(--border-default);
+    border-radius: var(--r-md);
+    color: var(--text-high);
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    padding: 9px 14px;
+    outline: none;
+    transition:
+      border-color var(--dur-fast) var(--ease-std),
+      box-shadow var(--dur-fast) var(--ease-std),
+      background-color var(--dur-fast) var(--ease-std);
+    line-height: 1.4;
+  }
+
+  .t-input.is-mono {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    letter-spacing: 0.05em;
+  }
+
+  .t-input::placeholder,
+  .t-textarea::placeholder {
+    color: var(--text-subtle);
+    opacity: 1;
+  }
+
+  .t-input:hover:not(:disabled):not(.is-error),
+  .t-textarea:hover:not(:disabled):not(.is-error) {
+    border-color: var(--border-strong);
+  }
+
+  .t-input:focus:not(.is-error),
+  .t-textarea:focus:not(.is-error) {
+    border-color: var(--color-primary);
+    box-shadow: var(--focus-ring);
+  }
+
+  .t-input.is-error,
+  .t-textarea.is-error { border-color: var(--color-danger); }
+  .t-input.is-error:focus,
+  .t-textarea.is-error:focus { box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.20); }
+
+  .t-input:disabled,
+  .t-textarea:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .t-field { margin-bottom: var(--sp-3); }
+  .t-field + .t-field { margin-top: var(--sp-4); }
+
+  .t-field-hint {
+    font-size: var(--text-2xs);
+    color: var(--text-low);
+    margin-top: 4px;
+  }
+
+  .t-field-error {
+    font-size: var(--text-2xs);
+    color: var(--color-danger);
+    margin-top: 4px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  /* OTP input — centered, spaced digits */
+  .t-input.is-otp {
+    font-family: var(--font-mono);
+    font-size: var(--text-xl);
+    text-align: center;
+    letter-spacing: 0.4em;
+    padding: 12px 8px;
+    font-weight: 600;
+  }
+
+  /* ==============================================================
+     [11] ALERTS
+     ============================================================== */
+  .t-alert {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--sp-3);
+    padding: var(--sp-3) var(--sp-4);
+    border-radius: var(--r-md);
+    border: 1px solid;
+    font-size: var(--text-sm);
+    line-height: var(--leading-snug);
+  }
+  .t-alert i { font-size: 18px; flex-shrink: 0; margin-top: 1px; }
+  .t-alert-content { flex: 1; min-width: 0; }
+  .t-alert-title { font-weight: 600; margin-bottom: 2px; }
+  .t-alert.v-info    { background: var(--color-info-dim);    color: var(--color-info);    border-color: var(--color-info-border); }
+  .t-alert.v-safe    { background: var(--color-safe-dim);    color: var(--color-safe);    border-color: var(--color-safe-border); }
+  .t-alert.v-warning { background: var(--color-warning-dim); color: var(--color-warning); border-color: var(--color-warning-border); }
+  .t-alert.v-danger  { background: var(--color-danger-dim);  color: var(--color-danger);  border-color: var(--color-danger-border); }
+
+  /* ==============================================================
+     [12] TOAST
+     ============================================================== */
+  #t-toast-container {
+    position: fixed;
+    bottom: var(--sp-5);
+    right: var(--sp-5);
+    z-index: var(--z-toast);
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-3);
+    pointer-events: none;
+    max-width: 400px;
+  }
+
+  .t-toast {
+    background: var(--bg-panel);
+    border: 1px solid var(--border-default);
+    border-left: 3px solid var(--color-primary);
+    border-radius: var(--r-md);
+    padding: var(--sp-3) var(--sp-4);
+    box-shadow: var(--shadow-lg);
+    display: flex;
+    align-items: flex-start;
+    gap: var(--sp-3);
+    min-width: 280px;
+    max-width: 100%;
+    pointer-events: auto;
+    animation: t-toast-in 0.3s var(--ease-spring);
+  }
+  .t-toast.is-leaving { animation: t-toast-out 0.25s var(--ease-in) forwards; }
+  .t-toast.v-safe    { border-left-color: var(--color-safe); }
+  .t-toast.v-warning { border-left-color: var(--color-warning); }
+  .t-toast.v-danger  { border-left-color: var(--color-danger); }
+  .t-toast.v-info    { border-left-color: var(--color-info); }
+
+  .t-toast-icon { font-size: 18px; flex-shrink: 0; margin-top: 2px; }
+  .t-toast.v-primary .t-toast-icon { color: var(--color-primary); }
+  .t-toast.v-safe    .t-toast-icon { color: var(--color-safe); }
+  .t-toast.v-warning .t-toast-icon { color: var(--color-warning); }
+  .t-toast.v-danger  .t-toast-icon { color: var(--color-danger); }
+  .t-toast.v-info    .t-toast-icon { color: var(--color-info); }
+
+  .t-toast-body { flex: 1; min-width: 0; }
+  .t-toast-title {
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--text-high);
+    margin-bottom: 2px;
+  }
+  .t-toast-message {
+    font-size: var(--text-xs);
+    color: var(--text-medium);
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+  }
+
+  .t-toast-close {
+    background: none;
+    border: none;
+    color: var(--text-subtle);
+    cursor: pointer;
+    padding: 2px;
+    border-radius: var(--r-xs);
+    transition: color var(--dur-fast);
+    flex-shrink: 0;
+  }
+  .t-toast-close:hover { color: var(--text-high); }
+  .t-toast-close i { font-size: 14px; }
+
+  @keyframes t-toast-in {
+    from { transform: translateX(110%); opacity: 0; }
+    to   { transform: translateX(0);    opacity: 1; }
+  }
+  @keyframes t-toast-out {
+    from { transform: translateX(0);    opacity: 1; }
+    to   { transform: translateX(110%); opacity: 0; }
+  }
+
+  /* ==============================================================
+     [13] LOADING / SPINNER
+     ============================================================== */
+  .t-spinner {
+    width: 40px; height: 40px;
+    border: 3px solid var(--border-default);
+    border-top-color: var(--color-primary);
+    border-radius: var(--r-full);
+    animation: t-spin 0.8s linear infinite;
+  }
+  .t-spinner.spinner-sm { width: 20px; height: 20px; border-width: 2px; }
+  .t-spinner.spinner-lg { width: 56px; height: 56px; border-width: 4px; }
+
+  @keyframes t-spin { to { transform: rotate(360deg); } }
+
+  .t-loading-text {
+    font-family: var(--font-display);
+    font-size: var(--text-sm);
+    color: var(--text-medium);
+    letter-spacing: var(--tracking-wide);
+  }
+
+  .t-loading-inline {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--sp-3);
+    padding: var(--sp-8);
+    color: var(--text-low);
+    font-size: var(--text-sm);
+  }
+
+  /* ==============================================================
+     [14] EMPTY STATE
+     ============================================================== */
+  .t-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: var(--sp-10) var(--sp-6);
+    color: var(--text-low);
+  }
+  .t-empty-icon {
+    font-size: 48px;
+    color: var(--text-subtle);
+    margin-bottom: var(--sp-3);
+    opacity: 0.6;
+  }
+  .t-empty-title {
+    font-family: var(--font-display);
+    font-size: var(--text-lg);
+    font-weight: 600;
+    color: var(--text-medium);
+    margin-bottom: var(--sp-2);
+  }
+  .t-empty-description {
+    font-size: var(--text-sm);
+    color: var(--text-low);
+    max-width: 400px;
+    line-height: var(--leading-normal);
+  }
+
+  /* ==============================================================
+     [15] STAT CARDS (placeholder for C.2)
+     ============================================================== */
+  .t-stat {
+    background: var(--bg-panel);
+    border: 1px solid var(--border-default);
+    border-radius: var(--r-lg);
+    padding: var(--sp-5);
+    transition: all var(--dur-fast) var(--ease-std);
+    position: relative;
+    overflow: hidden;
+  }
+  .t-stat:hover {
+    border-color: var(--border-strong);
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-md);
+  }
+
+  .t-stat-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--sp-3);
+  }
+  .t-stat-label {
+    font-size: var(--text-xs);
+    color: var(--text-low);
+    font-weight: 500;
+    letter-spacing: var(--tracking-wide);
+    text-transform: uppercase;
+  }
+  .t-stat-icon {
+    width: 32px; height: 32px;
+    border-radius: var(--r-md);
+    background: var(--color-primary-dim);
+    color: var(--color-primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+  }
+
+  .t-stat-value {
+    font-family: var(--font-display);
+    font-size: var(--text-3xl);
+    font-weight: 700;
+    color: var(--text-high);
+    line-height: 1.1;
+    letter-spacing: var(--tracking-tight);
+    font-variant-numeric: tabular-nums;
+  }
+  .t-stat-value.is-placeholder {
+    color: var(--text-subtle);
+    font-family: var(--font-mono);
+    font-size: var(--text-xl);
+    font-weight: 500;
+  }
+
+  .t-stat-sub {
+    font-size: var(--text-xs);
+    color: var(--text-low);
+    margin-top: var(--sp-2);
+  }
+
+  /* ==============================================================
+     [16] LAYOUT UTILITIES
+     ============================================================== */
+  .t-grid { display: grid; gap: var(--sp-4); }
+  .t-grid.g-2 { grid-template-columns: repeat(2, 1fr); }
+  .t-grid.g-3 { grid-template-columns: repeat(3, 1fr); }
+  .t-grid.g-4 { grid-template-columns: repeat(4, 1fr); }
+  .t-grid > * { min-width: 0; }
+
+  .t-flex { display: flex; }
+  .t-flex.f-col { flex-direction: column; }
+  .t-flex.f-center { align-items: center; justify-content: center; }
+  .t-flex.f-between { justify-content: space-between; }
+  .t-flex.f-wrap { flex-wrap: wrap; }
+  .t-gap-1 { gap: var(--sp-1); }
+  .t-gap-2 { gap: var(--sp-2); }
+  .t-gap-3 { gap: var(--sp-3); }
+  .t-gap-4 { gap: var(--sp-4); }
+
+  .t-mt-1 { margin-top: var(--sp-1); } .t-mt-2 { margin-top: var(--sp-2); }
+  .t-mt-3 { margin-top: var(--sp-3); } .t-mt-4 { margin-top: var(--sp-4); }
+  .t-mt-5 { margin-top: var(--sp-5); } .t-mt-6 { margin-top: var(--sp-6); }
+  .t-mb-1 { margin-bottom: var(--sp-1); } .t-mb-2 { margin-bottom: var(--sp-2); }
+  .t-mb-3 { margin-bottom: var(--sp-3); } .t-mb-4 { margin-bottom: var(--sp-4); }
+  .t-mb-5 { margin-bottom: var(--sp-5); } .t-mb-6 { margin-bottom: var(--sp-6); }
+
+  /* Typography */
+  .t-h1 {
+    font-family: var(--font-display);
+    font-size: var(--text-3xl);
+    font-weight: 700;
+    color: var(--text-high);
+    line-height: var(--leading-tight);
+    letter-spacing: var(--tracking-tight);
+  }
+  .t-h2 {
+    font-family: var(--font-display);
+    font-size: var(--text-2xl);
+    font-weight: 600;
+    color: var(--text-high);
+    line-height: var(--leading-tight);
+  }
+  .t-h3 {
+    font-family: var(--font-display);
+    font-size: var(--text-xl);
+    font-weight: 600;
+    color: var(--text-high);
+    line-height: var(--leading-snug);
+  }
+  .t-body { color: var(--text-medium); font-size: var(--text-sm); line-height: var(--leading-normal); }
+  .t-muted { color: var(--text-low); font-size: var(--text-xs); }
+  .t-mono { font-family: var(--font-mono); font-size: var(--text-xs); }
+
+  /* ==============================================================
+     [17] LOGIN SCREEN (custom)
+     ============================================================== */
+  .login-shell {
+    min-height: 100vh;
+    min-height: 100dvh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--sp-5);
+    background: var(--bg-base);
+    background-image:
+      radial-gradient(circle at 10% 20%, var(--color-primary-dim) 0%, transparent 40%),
+      radial-gradient(circle at 90% 80%, var(--color-secondary-dim) 0%, transparent 40%);
+  }
+
+  .login-card {
+    width: 100%;
+    max-width: 420px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-default);
+    border-radius: var(--r-lg);
+    padding: var(--sp-8);
+    box-shadow: var(--shadow-panel);
+  }
+
+  .login-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--sp-6);
+  }
+
+  .login-brand {
+    font-family: var(--font-display);
+    font-size: var(--text-xl);
+    font-weight: 700;
+    color: var(--text-high);
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    display: flex;
+    align-items: baseline;
+    gap: var(--sp-2);
+  }
+  .login-brand-accent { color: var(--color-primary); }
+  .login-brand-sub {
+    font-family: var(--font-mono);
+    font-size: var(--text-2xs);
+    color: var(--text-subtle);
+    letter-spacing: var(--tracking-wide);
+    font-weight: 500;
+    text-transform: uppercase;
+  }
+
+  .login-heading {
+    font-family: var(--font-display);
+    font-size: var(--text-2xl);
+    font-weight: 700;
+    color: var(--text-high);
+    margin-bottom: var(--sp-1);
+    letter-spacing: var(--tracking-tight);
+  }
+  .login-subtitle {
+    font-size: var(--text-sm);
+    color: var(--text-low);
+    margin-bottom: var(--sp-5);
+  }
+
+  .login-footer {
+    margin-top: var(--sp-5);
+    padding-top: var(--sp-4);
+    border-top: 1px solid var(--border-subtle);
+    text-align: center;
+    font-size: var(--text-xs);
+    color: var(--text-subtle);
+  }
+
+  /* ==============================================================
+     [18] SPLASH / BOOT SCREEN
+     ============================================================== */
+  .app-splash {
+    position: fixed;
+    inset: 0;
+    background: var(--bg-base);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--sp-4);
+    z-index: var(--z-overlay);
+  }
+
+  /* ==============================================================
+     [19] RESPONSIVE
+     ============================================================== */
+  @media (max-width: 1024px) {
+    .t-sidebar {
+      position: fixed;
+      top: 0; left: 0;
+      height: 100vh; height: 100dvh;
+      transform: translateX(-100%);
+      box-shadow: 4px 0 32px rgba(0, 0, 0, 0.4);
+    }
+    .t-sidebar.is-open { transform: translateX(0); }
+    .t-sidebar-overlay.is-visible { display: block; }
+    .t-sidebar-close-btn { display: flex; }
+    .t-topbar-hamburger { display: inline-flex; }
+  }
+
+  @media (max-width: 900px) {
+    .t-grid.g-2, .t-grid.g-3, .t-grid.g-4 { grid-template-columns: 1fr; }
+  }
+
+  @media (max-width: 700px) {
+    #t-toast-container {
+      left: var(--sp-4);
+      right: var(--sp-4);
+      bottom: var(--sp-4);
+    }
+    .t-toast { min-width: 0; max-width: 100%; }
+    .t-topbar { padding: 0 var(--sp-4); }
+    .t-topbar-title { font-size: var(--text-lg); }
+    .t-h1 { font-size: var(--text-2xl); }
+    .t-h2 { font-size: var(--text-xl); }
+    .t-h3 { font-size: var(--text-lg); }
+
+    .login-card { padding: var(--sp-6); }
+    .login-heading { font-size: var(--text-xl); }
+    .content-area { padding: var(--sp-4); }
+  }
+
+  @media (max-width: 480px) {
+    .t-topbar-btn { padding: 10px; width: auto; height: auto; }
+    .t-topbar-title { max-width: 130px; }
+  }
+
+  @media (max-height: 500px) and (orientation: landscape) {
+    .t-topbar { height: 44px; }
+    .t-sidebar-header { padding: var(--sp-3) var(--sp-5); }
+    .t-nav-item { padding: 5px var(--sp-5); }
+    .content-area { padding: var(--sp-4); }
+    .login-shell { min-height: auto; padding: var(--sp-4); }
+  }
+
+  /* Reduced motion */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+    .t-spinner { animation: none; border-top-color: var(--color-primary); }
+  }
+  </style>
+</head>
+
+<body>
+  <!-- Skip link for keyboard users -->
+  <a href="#main-content" class="skip-link" data-i18n="a11y.skipLink">Skip to main content</a>
+
+  <!-- ================================================================
+       [A] SPLASH SCREEN — shown while checking session on boot
+       ================================================================ -->
+  <div id="app-splash" class="app-splash">
+    <div class="t-spinner spinner-lg" aria-hidden="true"></div>
+    <div class="t-loading-text" data-i18n="common.loading">Loading...</div>
+  </div>
+
+  <!-- ================================================================
+       [B] LOGIN VIEW — shown when no session / not admin
+       ================================================================ -->
+  <div id="login-view" class="login-shell" hidden>
+    <div class="login-card">
+      <!-- Header: brand + lang toggle -->
+      <div class="login-header">
+        <div class="login-brand">
+          <span>BE<span class="login-brand-accent">TPP</span></span>
+          <span class="login-brand-sub" data-i18n="app.brandSub">Admin</span>
+        </div>
+        <div class="t-topbar-pill" role="group" aria-label="Language">
+          <button type="button" data-lang-btn="en" class="is-active">EN</button>
+          <button type="button" data-lang-btn="th">TH</button>
+        </div>
+      </div>
+
+      <!-- Step 1: Email input -->
+      <div id="login-step-email">
+        <h1 class="login-heading" data-i18n="login.heading">Sign in</h1>
+        <p class="login-subtitle" data-i18n="login.subtitle">
+          Sign in to BE-TPP Admin Portal
+        </p>
+
+        <form id="form-send-otp" novalidate>
+          <div class="t-field">
+            <label class="t-label" for="input-email">
+              <span data-i18n="login.emailLabel">Email address</span>
+              <span class="required">*</span>
+            </label>
+            <input
+              type="email"
+              class="t-input"
+              id="input-email"
+              name="email"
+              required
+              autocomplete="email"
+              inputmode="email"
+              spellcheck="false"
+              data-i18n-placeholder="login.emailPlaceholder"
+              placeholder="admin@example.com"
+            >
+            <div class="t-field-error" id="email-error" hidden></div>
+          </div>
+
+          <button type="submit" class="t-btn v-primary btn-lg btn-full t-mt-4" id="btn-send-otp">
+            <i class="ti ti-mail"></i>
+            <span data-i18n="login.sendOtpBtn">Send verification code</span>
+          </button>
+        </form>
+
+        <div class="login-footer">
+          <div data-i18n="login.help">
+            You will receive a 6-digit code by email. The code is valid for 60 minutes.
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 2: OTP verification -->
+      <div id="login-step-otp" hidden>
+        <h1 class="login-heading" data-i18n="login.otpHeading">Enter code</h1>
+        <p class="login-subtitle">
+          <span data-i18n="login.otpSubtitle">Code sent to</span>
+          <strong id="otp-email-display" class="t-mono" style="color: var(--text-medium);"></strong>
+        </p>
+
+        <div class="t-alert v-info t-mb-4" role="status">
+          <i class="ti ti-info-circle"></i>
+          <div class="t-alert-content" data-i18n="login.otpInfo">
+            Check your inbox (and spam folder) for the 6-digit code.
+          </div>
+        </div>
+
+        <form id="form-verify-otp" novalidate>
+          <div class="t-field">
+            <label class="t-label" for="input-otp">
+              <span data-i18n="login.otpLabel">Verification code</span>
+              <span class="required">*</span>
+            </label>
+            <input
+              type="text"
+              class="t-input is-otp"
+              id="input-otp"
+              name="otp"
+              required
+              autocomplete="one-time-code"
+              inputmode="numeric"
+              pattern="[0-9]{6}"
+              maxlength="6"
+              placeholder="000000"
+              aria-describedby="otp-hint"
+            >
+            <div class="t-field-hint" id="otp-hint" data-i18n="login.otpHint">
+              6-digit code from your email
+            </div>
+            <div class="t-field-error" id="otp-error" hidden></div>
+          </div>
+
+          <button type="submit" class="t-btn v-primary btn-lg btn-full t-mt-4" id="btn-verify-otp">
+            <i class="ti ti-login"></i>
+            <span data-i18n="login.verifyBtn">Verify &amp; sign in</span>
+          </button>
+
+          <div class="t-flex f-between t-gap-2 t-mt-3">
+            <button type="button" class="t-btn v-ghost btn-sm" id="btn-back-to-email">
+              <i class="ti ti-arrow-left"></i>
+              <span data-i18n="login.backBtn">Different email</span>
+            </button>
+            <button type="button" class="t-btn v-subtle btn-sm" id="btn-resend-otp">
+              <i class="ti ti-refresh"></i>
+              <span data-i18n="login.resendBtn">Resend code</span>
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Login error alert container -->
+      <div id="login-alert-container" class="t-mt-4" hidden></div>
+    </div>
+  </div>
+
+  <!-- ================================================================
+       [C] APP VIEW — main shell with sidebar + topbar + content
+       ================================================================ -->
+  <div id="app-view" class="t-app-shell" hidden>
+
+    <!-- Sidebar -->
+    <aside class="t-sidebar" id="sidebar" aria-label="Main navigation">
+      <div class="t-sidebar-header">
+        <div class="t-sidebar-brand">
+          <span>BE<span class="t-sidebar-brand-accent">TPP</span></span>
+          <span class="t-sidebar-brand-sub" data-i18n="app.brandSub">Admin</span>
+        </div>
+        <button type="button" class="t-sidebar-close-btn" id="btn-sidebar-close" aria-label="Close menu">
+          <i class="ti ti-x"></i>
+        </button>
+      </div>
+
+      <nav class="t-sidebar-nav">
+        <div class="t-nav-group">
+          <div class="t-nav-group-label" data-i18n="nav.navigation">Navigation</div>
+          <button type="button" class="t-nav-item is-active" data-view="dashboard">
+            <i class="ti ti-layout-dashboard"></i>
+            <span data-i18n="nav.dashboard">Dashboard</span>
+          </button>
+          <button type="button" class="t-nav-item" data-view="devices">
+            <i class="ti ti-device-desktop-analytics"></i>
+            <span data-i18n="nav.devices">Devices</span>
+          </button>
+          <button type="button" class="t-nav-item is-disabled" data-view="users" aria-disabled="true" disabled>
+            <i class="ti ti-users"></i>
+            <span data-i18n="nav.users">Users</span>
+            <span class="t-nav-item-badge" data-i18n="nav.soon">Soon</span>
+          </button>
+        </div>
+      </nav>
+
+      <div class="t-sidebar-footer">
+        <div class="t-sidebar-footer-avatar" id="sidebar-avatar">?</div>
+        <div class="t-sidebar-footer-info">
+          <div class="t-sidebar-footer-name" id="sidebar-user-name">—</div>
+          <div class="t-sidebar-footer-role" id="sidebar-user-role">—</div>
+        </div>
+      </div>
+    </aside>
+
+    <div class="t-sidebar-overlay" id="sidebar-overlay" aria-hidden="true"></div>
+
+    <!-- Main area: topbar + content -->
+    <main class="app-main">
+      <header class="t-topbar">
+        <div class="t-topbar-left">
+          <button type="button" class="t-topbar-hamburger" id="btn-sidebar-open" aria-label="Open menu">
+            <i class="ti ti-menu-2"></i>
+          </button>
+          <h1 class="t-topbar-title" id="page-title" data-i18n="nav.dashboard">Dashboard</h1>
+        </div>
+        <div class="t-topbar-right">
+          <!-- Language toggle -->
+          <div class="t-topbar-pill" role="group" aria-label="Language">
+            <button type="button" data-lang-btn="en" class="is-active">EN</button>
+            <button type="button" data-lang-btn="th">TH</button>
+          </div>
+          <!-- Theme toggle -->
+          <button type="button" class="t-topbar-btn" id="btn-theme-toggle" aria-label="Toggle theme">
+            <i class="ti ti-sun" id="theme-icon"></i>
+          </button>
+          <!-- Logout -->
+          <button type="button" class="t-topbar-btn" id="btn-logout" aria-label="Sign out">
+            <i class="ti ti-logout"></i>
+          </button>
+        </div>
+      </header>
+
+      <div class="content-area" id="main-content">
+
+        <!-- Dashboard view -->
+        <section id="view-dashboard" class="app-view-section">
+          <h2 class="t-h2 t-mb-2" data-i18n="dashboard.title">Dashboard</h2>
+          <p class="t-body t-mb-5" id="dashboard-welcome">—</p>
+
+          <!-- Placeholder stat cards -->
+          <div class="t-grid g-3">
+            <div class="t-stat">
+              <div class="t-stat-header">
+                <div class="t-stat-label" data-i18n="dashboard.stat.devices">Devices</div>
+                <div class="t-stat-icon"><i class="ti ti-device-desktop-analytics"></i></div>
+              </div>
+              <div class="t-stat-value is-placeholder">—</div>
+              <div class="t-stat-sub" data-i18n="dashboard.stat.comingSoon">Coming in C.2</div>
+            </div>
+            <div class="t-stat">
+              <div class="t-stat-header">
+                <div class="t-stat-label" data-i18n="dashboard.stat.users">Users</div>
+                <div class="t-stat-icon"><i class="ti ti-users"></i></div>
+              </div>
+              <div class="t-stat-value is-placeholder">—</div>
+              <div class="t-stat-sub" data-i18n="dashboard.stat.comingSoon">Coming in C.2</div>
+            </div>
+            <div class="t-stat">
+              <div class="t-stat-header">
+                <div class="t-stat-label" data-i18n="dashboard.stat.photos">Photos</div>
+                <div class="t-stat-icon"><i class="ti ti-photo"></i></div>
+              </div>
+              <div class="t-stat-value is-placeholder">—</div>
+              <div class="t-stat-sub" data-i18n="dashboard.stat.comingSoon">Coming in C.2</div>
+            </div>
+          </div>
+
+          <!-- Info alert -->
+          <div class="t-panel t-mt-6">
+            <div class="t-panel-body">
+              <div class="t-empty">
+                <div class="t-empty-icon"><i class="ti ti-rocket"></i></div>
+                <div class="t-empty-title" data-i18n="dashboard.readyTitle">Round C.1 ready</div>
+                <div class="t-empty-description" data-i18n="dashboard.readyDescription">
+                  Authentication, i18n, and shell are working. Device management UI arrives in Round C.2.
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Devices view (placeholder) -->
+        <section id="view-devices" class="app-view-section" hidden>
+          <h2 class="t-h2 t-mb-2" data-i18n="devices.title">Devices</h2>
+          <div class="t-panel t-mt-4">
+            <div class="t-panel-body">
+              <div class="t-empty">
+                <div class="t-empty-icon"><i class="ti ti-tools"></i></div>
+                <div class="t-empty-title" data-i18n="devices.placeholderTitle">Coming soon</div>
+                <div class="t-empty-description" data-i18n="devices.placeholder">
+                  The device list with search, filter, and edit will be available in Round C.2.
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </div>
+    </main>
+  </div>
+
+  <!-- Toast container -->
+  <div id="t-toast-container" aria-live="polite" aria-atomic="false"></div>
+
+  <!-- ================================================================
+       Supabase SDK (UMD) — load from CDN
+       ================================================================ -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+
+  <script>
+  'use strict';
+
+  // =================================================================
+  // [1] CONFIG
+  // =================================================================
+  const SUPABASE_URL = 'https://brgzimwzcfbwkgymqzvy.supabase.co';
+  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJyZ3ppbXd6Y2Zid2tneW1xenZ5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgwMzgzMDMsImV4cCI6MjA4MzYxNDMwM30.kSZCG67OlQVR_2ECFpA7uqi4TeQ1osIlngOJJ6OI5dM';
+
+  const APP_VERSION = 'v0.1.0';
+  const APP_ROUND = 'C.1';
+
+  const STORAGE_KEYS = {
+    lang:  'be-tpp-admin.lang',
+    theme: 'be-tpp-admin.theme',
+    email: 'be-tpp-admin.last-email'  // remember last used email for convenience
+  };
+
+  // สร้าง Supabase client (global reference)
+  const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: false  // ใช้ OTP code — ไม่ต้อง detect URL redirect
+    }
+  });
+
+  console.log(`[BE-TPP Admin] Boot ${APP_VERSION} (Round ${APP_ROUND})`);
+
+  // =================================================================
+  // [2] APP STATE
+  // =================================================================
+  const state = {
+    currentUser:    null,   // Supabase user object
+    userProfile:    null,   // profiles row (display_name, etc.)
+    userRole:       null,   // 'admin' | 'super_admin' | null
+    isAdmin:        false,
+    currentView:    'dashboard',  // 'dashboard' | 'devices' | 'users'
+    currentLang:    'en',         // 'en' | 'th'
+    currentTheme:   'dark',       // 'dark' | 'light'
+    pendingEmail:   null          // email ที่กำลัง verify OTP
+  };
+
+  // =================================================================
+  // [3] i18n — Translation Dictionary
+  // =================================================================
+  const translations = {
+    en: {
+      // App
+      'app.title': 'BE-TPP Admin Portal',
+      'app.brandSub': 'Admin',
+
+      // A11y
+      'a11y.skipLink': 'Skip to main content',
+
+      // Common
+      'common.loading': 'Loading...',
+      'common.ok': 'OK',
+      'common.cancel': 'Cancel',
+      'common.close': 'Close',
+      'common.error': 'Error',
+      'common.success': 'Success',
+
+      // Login — step 1 (email)
+      'login.heading': 'Sign in',
+      'login.subtitle': 'Sign in to BE-TPP Admin Portal',
+      'login.emailLabel': 'Email address',
+      'login.emailPlaceholder': 'admin@example.com',
+      'login.sendOtpBtn': 'Send verification code',
+      'login.sending': 'Sending...',
+      'login.help': 'You will receive a 6-digit code by email. The code is valid for 60 minutes.',
+
+      // Login — step 2 (OTP)
+      'login.otpHeading': 'Enter code',
+      'login.otpSubtitle': 'Code sent to',
+      'login.otpInfo': 'Check your inbox (and spam folder) for the 6-digit code.',
+      'login.otpLabel': 'Verification code',
+      'login.otpHint': '6-digit code from your email',
+      'login.verifyBtn': 'Verify & sign in',
+      'login.verifying': 'Verifying...',
+      'login.backBtn': 'Different email',
+      'login.resendBtn': 'Resend code',
+
+      // Errors
+      'error.invalidEmail': 'Please enter a valid email address',
+      'error.invalidOtp': 'Please enter the 6-digit code',
+      'error.otpFailed': 'Invalid or expired code. Please try again or request a new one.',
+      'error.notAdmin': 'This account is not authorized for Admin Portal access.',
+      'error.network': 'Network error. Please check your connection and try again.',
+      'error.sessionExpired': 'Your session has expired. Please sign in again.',
+      'error.generic': 'Something went wrong. Please try again.',
+
+      // Sidebar / nav
+      'nav.navigation': 'Navigation',
+      'nav.dashboard': 'Dashboard',
+      'nav.devices': 'Devices',
+      'nav.users': 'Users',
+      'nav.soon': 'Soon',
+
+      // Dashboard
+      'dashboard.title': 'Dashboard',
+      'dashboard.welcome': 'Welcome, {name}',
+      'dashboard.welcomeAnonymous': 'Welcome',
+      'dashboard.stat.devices': 'Devices',
+      'dashboard.stat.users': 'Users',
+      'dashboard.stat.photos': 'Photos',
+      'dashboard.stat.comingSoon': 'Coming in C.2',
+      'dashboard.readyTitle': 'Round C.1 ready',
+      'dashboard.readyDescription': 'Authentication, i18n, and shell are working. Device management UI arrives in Round C.2.',
+
+      // Devices
+      'devices.title': 'Devices',
+      'devices.placeholderTitle': 'Coming soon',
+      'devices.placeholder': 'The device list with search, filter, and edit will be available in Round C.2.',
+
+      // Toast messages
+      'toast.otpSentTitle': 'Code sent',
+      'toast.otpSentMessage': 'Check your email for the verification code.',
+      'toast.loginSuccessTitle': 'Signed in',
+      'toast.loginSuccessMessage': 'Welcome back, {email}',
+      'toast.logoutSuccessTitle': 'Signed out',
+      'toast.logoutSuccessMessage': 'You have been signed out successfully.',
+      'toast.langChangedTitle': 'Language changed',
+      'toast.themeChangedTitle': 'Theme changed',
+
+      // Aria labels
+      'aria.closeToast': 'Close notification'
+    },
+    th: {
+      // App
+      'app.title': 'BE-TPP Admin Portal',
+      'app.brandSub': 'แอดมิน',
+
+      // A11y
+      'a11y.skipLink': 'ข้ามไปยังเนื้อหาหลัก',
+
+      // Common
+      'common.loading': 'กำลังโหลด...',
+      'common.ok': 'ตกลง',
+      'common.cancel': 'ยกเลิก',
+      'common.close': 'ปิด',
+      'common.error': 'ข้อผิดพลาด',
+      'common.success': 'สำเร็จ',
+
+      // Login — step 1
+      'login.heading': 'เข้าสู่ระบบ',
+      'login.subtitle': 'เข้าสู่ BE-TPP Admin Portal',
+      'login.emailLabel': 'อีเมล',
+      'login.emailPlaceholder': 'admin@example.com',
+      'login.sendOtpBtn': 'ส่งรหัสยืนยัน',
+      'login.sending': 'กำลังส่ง...',
+      'login.help': 'คุณจะได้รับรหัส 6 หลักทางอีเมล รหัสมีอายุ 60 นาที',
+
+      // Login — step 2
+      'login.otpHeading': 'กรอกรหัสยืนยัน',
+      'login.otpSubtitle': 'ส่งรหัสไปที่',
+      'login.otpInfo': 'ตรวจสอบ inbox (และ spam) เพื่อหารหัส 6 หลัก',
+      'login.otpLabel': 'รหัสยืนยัน',
+      'login.otpHint': 'รหัส 6 หลักจากอีเมลของคุณ',
+      'login.verifyBtn': 'ยืนยันและเข้าสู่ระบบ',
+      'login.verifying': 'กำลังตรวจสอบ...',
+      'login.backBtn': 'ใช้อีเมลอื่น',
+      'login.resendBtn': 'ส่งรหัสใหม่',
+
+      // Errors
+      'error.invalidEmail': 'กรุณากรอกอีเมลให้ถูกต้อง',
+      'error.invalidOtp': 'กรุณากรอกรหัส 6 หลัก',
+      'error.otpFailed': 'รหัสไม่ถูกต้องหรือหมดอายุ กรุณาลองใหม่หรือขอรหัสใหม่',
+      'error.notAdmin': 'บัญชีนี้ไม่มีสิทธิ์เข้าใช้ Admin Portal',
+      'error.network': 'การเชื่อมต่อขัดข้อง กรุณาตรวจสอบ internet และลองใหม่',
+      'error.sessionExpired': 'เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่',
+      'error.generic': 'เกิดข้อผิดพลาด กรุณาลองใหม่',
+
+      // Sidebar / nav
+      'nav.navigation': 'เมนู',
+      'nav.dashboard': 'แดชบอร์ด',
+      'nav.devices': 'อุปกรณ์',
+      'nav.users': 'ผู้ใช้',
+      'nav.soon': 'เร็วๆ นี้',
+
+      // Dashboard
+      'dashboard.title': 'แดชบอร์ด',
+      'dashboard.welcome': 'ยินดีต้อนรับ {name}',
+      'dashboard.welcomeAnonymous': 'ยินดีต้อนรับ',
+      'dashboard.stat.devices': 'อุปกรณ์',
+      'dashboard.stat.users': 'ผู้ใช้',
+      'dashboard.stat.photos': 'รูปภาพ',
+      'dashboard.stat.comingSoon': 'จะมาใน C.2',
+      'dashboard.readyTitle': 'Round C.1 พร้อมใช้งาน',
+      'dashboard.readyDescription': 'ระบบ authentication, i18n, และ shell ทำงานได้แล้ว — Device UI จะมาใน Round C.2',
+
+      // Devices
+      'devices.title': 'อุปกรณ์',
+      'devices.placeholderTitle': 'เร็วๆ นี้',
+      'devices.placeholder': 'รายการอุปกรณ์พร้อม search/filter/edit จะมาใน Round C.2',
+
+      // Toast messages
+      'toast.otpSentTitle': 'ส่งรหัสแล้ว',
+      'toast.otpSentMessage': 'ตรวจสอบอีเมลของคุณเพื่อดูรหัสยืนยัน',
+      'toast.loginSuccessTitle': 'เข้าสู่ระบบแล้ว',
+      'toast.loginSuccessMessage': 'ยินดีต้อนรับกลับมา, {email}',
+      'toast.logoutSuccessTitle': 'ออกจากระบบแล้ว',
+      'toast.logoutSuccessMessage': 'คุณได้ออกจากระบบเรียบร้อยแล้ว',
+      'toast.langChangedTitle': 'เปลี่ยนภาษาแล้ว',
+      'toast.themeChangedTitle': 'เปลี่ยนธีมแล้ว',
+
+      // Aria labels
+      'aria.closeToast': 'ปิดการแจ้งเตือน'
+    }
+  };
+
+  /**
+   * t(key, vars) — ดึงข้อความแปลภาษาตาม state.currentLang
+   * vars = {name: 'Hugh'} → จะ replace {name} ใน string
+   */
+  function t(key, vars) {
+    const dict = translations[state.currentLang] || translations.en;
+    let str = dict[key];
+    if (str == null) {
+      // Fallback to EN if missing in current lang
+      str = translations.en[key];
+    }
+    if (str == null) {
+      // Missing key entirely — return key as visible warning
+      console.warn(`[i18n] Missing key: ${key}`);
+      return key;
+    }
+    if (vars && typeof vars === 'object') {
+      for (const k of Object.keys(vars)) {
+        str = str.replace(new RegExp(`\\{${k}\\}`, 'g'), String(vars[k]));
+      }
+    }
+    return str;
+  }
+
+  /**
+   * applyTranslations() — ใส่ข้อความแปลเข้า DOM ทั้งหมด
+   * - data-i18n="key" → textContent
+   * - data-i18n-placeholder="key" → placeholder attribute
+   * - data-i18n-aria-label="key" → aria-label attribute
+   */
+  function applyTranslations() {
+    // text content
+    document.querySelectorAll('[data-i18n]').forEach(el => {
+      const key = el.getAttribute('data-i18n');
+      el.textContent = t(key);
+    });
+    // placeholder
+    document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+      const key = el.getAttribute('data-i18n-placeholder');
+      el.setAttribute('placeholder', t(key));
+    });
+    // aria-label
+    document.querySelectorAll('[data-i18n-aria-label]').forEach(el => {
+      const key = el.getAttribute('data-i18n-aria-label');
+      el.setAttribute('aria-label', t(key));
+    });
+    // Sync <html lang> attribute
+    document.documentElement.setAttribute('lang', state.currentLang);
+    // Sync dynamic fields
+    updateDynamicLabels();
+  }
+
+  /**
+   * updateDynamicLabels() — refresh labels ที่มี vars (welcome name, page title)
+   */
+  function updateDynamicLabels() {
+    // Page title (topbar)
+    const pageTitleEl = document.getElementById('page-title');
+    if (pageTitleEl) {
+      pageTitleEl.textContent = t(`nav.${state.currentView}`);
+    }
+    // Welcome message
+    const welcomeEl = document.getElementById('dashboard-welcome');
+    if (welcomeEl) {
+      if (state.userProfile && state.userProfile.display_name) {
+        welcomeEl.textContent = t('dashboard.welcome', { name: state.userProfile.display_name });
+      } else if (state.currentUser && state.currentUser.email) {
+        welcomeEl.textContent = t('dashboard.welcome', { name: state.currentUser.email });
+      } else {
+        welcomeEl.textContent = t('dashboard.welcomeAnonymous');
+      }
+    }
+    // Sidebar footer
+    const sidebarName = document.getElementById('sidebar-user-name');
+    const sidebarRole = document.getElementById('sidebar-user-role');
+    const sidebarAvatar = document.getElementById('sidebar-avatar');
+    if (sidebarName) {
+      const name = (state.userProfile && state.userProfile.display_name) ||
+                   (state.currentUser && state.currentUser.email) || '—';
+      sidebarName.textContent = name;
+      if (sidebarAvatar) {
+        sidebarAvatar.textContent = name.charAt(0).toUpperCase() || '?';
+      }
+    }
+    if (sidebarRole) {
+      sidebarRole.textContent = state.userRole || '—';
+    }
+    // Document title
+    document.title = `${t('app.title')}`;
+  }
+
+  /**
+   * setLanguage(lang) — เปลี่ยนภาษา + persist + re-apply
+   */
+  function setLanguage(lang) {
+    if (lang !== 'en' && lang !== 'th') return;
+    state.currentLang = lang;
+    try {
+      localStorage.setItem(STORAGE_KEYS.lang, lang);
+    } catch (_) { /* ignore */ }
+    // Update toggle button states (ทุกปุ่ม lang-btn — login + topbar)
+    document.querySelectorAll('[data-lang-btn]').forEach(btn => {
+      btn.classList.toggle('is-active', btn.getAttribute('data-lang-btn') === lang);
+    });
+    applyTranslations();
+  }
+
+  /**
+   * loadLanguage() — โหลดภาษาจาก localStorage หรือ browser pref
+   */
+  function loadLanguage() {
+    let lang = 'en';
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.lang);
+      if (saved === 'en' || saved === 'th') {
+        lang = saved;
+      } else if (navigator.language && navigator.language.toLowerCase().startsWith('th')) {
+        lang = 'th';
+      }
+    } catch (_) { /* ignore */ }
+    setLanguage(lang);
+  }
+
+  // =================================================================
+  // [4] HELPERS
+  // =================================================================
+
+  /**
+   * sanitizeHTML(str) — ป้องกัน XSS เวลา render ด้วย innerHTML
+   * Pattern จาก phase3-test.html
+   */
+  function sanitizeHTML(str) {
+    const temp = document.createElement('div');
+    temp.textContent = String(str == null ? '' : str);
+    return temp.innerHTML;
+  }
+
+  /**
+   * isValidEmail(email) — basic email format check
+   */
+  function isValidEmail(email) {
+    if (typeof email !== 'string') return false;
+    const trimmed = email.trim();
+    // basic regex — not overly strict
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed);
+  }
+
+  /**
+   * setButtonLoading(btn, isLoading, loadingLabelKey) — toggle loading state on button
+   */
+  function setButtonLoading(btn, isLoading, loadingLabelKey) {
+    if (!btn) return;
+    if (isLoading) {
+      btn.disabled = true;
+      btn.dataset.origHtml = btn.innerHTML;
+      const label = loadingLabelKey ? t(loadingLabelKey) : t('common.loading');
+      btn.innerHTML = '<span class="t-spinner spinner-sm" aria-hidden="true"></span> ' + sanitizeHTML(label);
+    } else {
+      btn.disabled = false;
+      if (btn.dataset.origHtml) {
+        btn.innerHTML = btn.dataset.origHtml;
+        delete btn.dataset.origHtml;
+      }
+    }
+  }
+
+  /**
+   * showToast(type, titleKey, messageKey, vars) — แสดง toast notification
+   * type: 'primary' | 'safe' | 'warning' | 'danger' | 'info'
+   */
+  function showToast(type, titleKey, messageKey, vars) {
+    const container = document.getElementById('t-toast-container');
+    if (!container) return;
+
+    const iconMap = {
+      primary: 'ti-info-circle',
+      safe:    'ti-circle-check',
+      warning: 'ti-alert-triangle',
+      danger:  'ti-alert-circle',
+      info:    'ti-info-circle'
+    };
+    const variantClass = 'v-' + (type || 'primary');
+    const iconClass = iconMap[type] || 'ti-info-circle';
+
+    const title = titleKey ? t(titleKey, vars) : '';
+    const message = messageKey ? t(messageKey, vars) : '';
+
+    const toast = document.createElement('div');
+    toast.className = 't-toast ' + variantClass;
+    toast.setAttribute('role', type === 'danger' ? 'alert' : 'status');
+    toast.innerHTML =
+      '<i class="ti ' + iconClass + ' t-toast-icon" aria-hidden="true"></i>' +
+      '<div class="t-toast-body">' +
+        (title ? '<div class="t-toast-title">' + sanitizeHTML(title) + '</div>' : '') +
+        (message ? '<div class="t-toast-message">' + sanitizeHTML(message) + '</div>' : '') +
+      '</div>' +
+      '<button type="button" class="t-toast-close" aria-label="' + sanitizeHTML(t('aria.closeToast')) + '">' +
+        '<i class="ti ti-x" aria-hidden="true"></i>' +
+      '</button>';
+
+    container.appendChild(toast);
+
+    // Auto-dismiss after 4s (danger = 6s for more reading time)
+    const timeout = type === 'danger' ? 6000 : 4000;
+    const timer = setTimeout(() => dismissToast(toast), timeout);
+
+    // Close on click
+    toast.querySelector('.t-toast-close').addEventListener('click', () => {
+      clearTimeout(timer);
+      dismissToast(toast);
+    });
+  }
+
+  function dismissToast(toast) {
+    if (!toast || !toast.parentNode) return;
+    toast.classList.add('is-leaving');
+    setTimeout(() => {
+      if (toast.parentNode) toast.parentNode.removeChild(toast);
+    }, 260);
+  }
+
+  /**
+   * showLoginAlert(type, messageKey) — แสดง alert ใน login card
+   */
+  function showLoginAlert(type, messageKey, vars) {
+    const container = document.getElementById('login-alert-container');
+    if (!container) return;
+    const iconMap = {
+      info: 'ti-info-circle',
+      safe: 'ti-circle-check',
+      warning: 'ti-alert-triangle',
+      danger: 'ti-alert-circle'
+    };
+    const iconClass = iconMap[type] || 'ti-info-circle';
+    container.innerHTML =
+      '<div class="t-alert v-' + sanitizeHTML(type) + '" role="alert">' +
+        '<i class="ti ' + iconClass + '" aria-hidden="true"></i>' +
+        '<div class="t-alert-content">' + sanitizeHTML(t(messageKey, vars)) + '</div>' +
+      '</div>';
+    container.hidden = false;
+  }
+
+  function clearLoginAlert() {
+    const container = document.getElementById('login-alert-container');
+    if (!container) return;
+    container.innerHTML = '';
+    container.hidden = true;
+  }
+
+  /**
+   * showFieldError(fieldErrorEl, messageKey) — แสดง error ใต้ input field
+   */
+  function showFieldError(errorEl, inputEl, messageKey) {
+    if (!errorEl) return;
+    errorEl.textContent = t(messageKey);
+    errorEl.hidden = false;
+    if (inputEl) inputEl.classList.add('is-error');
+  }
+
+  function clearFieldError(errorEl, inputEl) {
+    if (!errorEl) return;
+    errorEl.textContent = '';
+    errorEl.hidden = true;
+    if (inputEl) inputEl.classList.remove('is-error');
+  }
+
+  // =================================================================
+  // [5] THEME TOGGLE
+  // =================================================================
+  function setTheme(theme) {
+    if (theme !== 'dark' && theme !== 'light') return;
+    state.currentTheme = theme;
+    document.documentElement.setAttribute('data-theme', theme);
+    try {
+      localStorage.setItem(STORAGE_KEYS.theme, theme);
+    } catch (_) { /* ignore */ }
+    // Update theme icon
+    const iconEl = document.getElementById('theme-icon');
+    if (iconEl) {
+      iconEl.className = theme === 'dark' ? 'ti ti-sun' : 'ti ti-moon';
+    }
+  }
+
+  function loadTheme() {
+    let theme = 'dark';
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.theme);
+      if (saved === 'dark' || saved === 'light') {
+        theme = saved;
+      } else if (window.matchMedia('(prefers-color-scheme: light)').matches) {
+        theme = 'light';
+      }
+    } catch (_) { /* ignore */ }
+    setTheme(theme);
+  }
+
+  function toggleTheme() {
+    setTheme(state.currentTheme === 'dark' ? 'light' : 'dark');
+  }
+
+  // =================================================================
+  // [6] VIEW ROUTING (within app shell)
+  // =================================================================
+  function switchView(view) {
+    if (view !== 'dashboard' && view !== 'devices') {
+      // 'users' is disabled in C.1
+      return;
+    }
+    state.currentView = view;
+
+    // Toggle section visibility
+    document.querySelectorAll('.app-view-section').forEach(sec => {
+      sec.hidden = sec.id !== 'view-' + view;
+    });
+
+    // Update sidebar active state
+    document.querySelectorAll('.t-nav-item[data-view]').forEach(item => {
+      item.classList.toggle('is-active', item.getAttribute('data-view') === view);
+    });
+
+    // Close sidebar on mobile after nav
+    closeSidebarDrawer();
+
+    // Update topbar title
+    updateDynamicLabels();
+  }
+
+  // =================================================================
+  // [7] SIDEBAR DRAWER (mobile)
+  // =================================================================
+  function openSidebarDrawer() {
+    const sb = document.getElementById('sidebar');
+    const ov = document.getElementById('sidebar-overlay');
+    if (sb) sb.classList.add('is-open');
+    if (ov) {
+      ov.classList.add('is-visible');
+      ov.setAttribute('aria-hidden', 'false');
+    }
+  }
+
+  function closeSidebarDrawer() {
+    const sb = document.getElementById('sidebar');
+    const ov = document.getElementById('sidebar-overlay');
+    if (sb) sb.classList.remove('is-open');
+    if (ov) {
+      ov.classList.remove('is-visible');
+      ov.setAttribute('aria-hidden', 'true');
+    }
+  }
+
+  // =================================================================
+  // [8] AUTH FLOW — OTP Email
+  // =================================================================
+
+  /**
+   * sendOtp(email) — Step 1: ขอ OTP ส่งไป email
+   */
+  async function sendOtp(email) {
+    clearLoginAlert();
+    const normalized = String(email || '').trim().toLowerCase();
+    if (!isValidEmail(normalized)) {
+      throw new Error('invalid_email');
+    }
+
+    const { error } = await sb.auth.signInWithOtp({
+      email: normalized,
+      options: {
+        shouldCreateUser: false  // admin ต้องถูกสร้างก่อน (ผ่าน Warunyu ใน Supabase Dashboard)
+      }
+    });
+
+    if (error) {
+      console.error('[auth] signInWithOtp error:', error);
+      // Supabase return generic error ถ้า email ไม่มีในระบบ — ไม่บอกใบ้
+      throw new Error(error.message || 'otp_send_failed');
+    }
+
+    // Save email for convenience
+    try {
+      localStorage.setItem(STORAGE_KEYS.email, normalized);
+    } catch (_) { /* ignore */ }
+
+    state.pendingEmail = normalized;
+    return normalized;
+  }
+
+  /**
+   * verifyOtp(email, code) — Step 2: verify 6-digit code
+   */
+  async function verifyOtp(email, code) {
+    const normalized = String(email || '').trim().toLowerCase();
+    const token = String(code || '').trim();
+
+    const { data, error } = await sb.auth.verifyOtp({
+      email: normalized,
+      token: token,
+      type: 'email'
+    });
+
+    if (error) {
+      console.error('[auth] verifyOtp error:', error);
+      throw new Error(error.message || 'otp_verify_failed');
+    }
+
+    return data;  // { user, session }
+  }
+
+  /**
+   * checkIsAdmin() — call is_admin() RPC + ดึง profile + role
+   * Returns { isAdmin, role, profile }
+   */
+  async function checkIsAdmin() {
+    try {
+      // Call is_admin() RPC (SECURITY DEFINER + STABLE — ตั้งค่าใน Round A)
+      const { data: isAdminResult, error: isAdminError } = await sb.rpc('is_admin');
+
+      if (isAdminError) {
+        console.error('[auth] is_admin() RPC error:', isAdminError);
+        return { isAdmin: false, role: null, profile: null, error: isAdminError };
+      }
+
+      const isAdmin = isAdminResult === true;
+
+      // Fetch user profile + role (best-effort, non-blocking for admin check)
+      let profile = null;
+      let role = null;
+
+      try {
+        const { data: profileData } = await sb
+          .from('profiles')
+          .select('id, email, display_name, phone, address')
+          .eq('id', state.currentUser.id)
+          .maybeSingle();
+        profile = profileData || null;
+      } catch (e) {
+        console.warn('[auth] profile fetch failed (non-fatal):', e);
+      }
+
+      if (isAdmin) {
+        try {
+          const { data: roleData } = await sb
+            .from('user_roles')
+            .select('role')
+            .eq('user_id', state.currentUser.id)
+            .maybeSingle();
+          role = (roleData && roleData.role) || 'admin';
+        } catch (e) {
+          console.warn('[auth] role fetch failed (non-fatal):', e);
+          role = 'admin';  // fallback
+        }
+      }
+
+      return { isAdmin, role, profile, error: null };
+    } catch (e) {
+      console.error('[auth] checkIsAdmin unexpected error:', e);
+      return { isAdmin: false, role: null, profile: null, error: e };
+    }
+  }
+
+  /**
+   * signOut() — ออกจากระบบ
+   */
+  async function signOut() {
+    try {
+      await sb.auth.signOut();
+    } catch (e) {
+      console.warn('[auth] signOut error (non-fatal):', e);
+    }
+    // Clear state
+    state.currentUser = null;
+    state.userProfile = null;
+    state.userRole = null;
+    state.isAdmin = false;
+    state.pendingEmail = null;
+    // Show login view
+    showLoginView();
+    showToast('safe', 'toast.logoutSuccessTitle', 'toast.logoutSuccessMessage');
+  }
+
+  // =================================================================
+  // [9] VIEW TRANSITIONS
+  // =================================================================
+  function showSplash() {
+    document.getElementById('app-splash').hidden = false;
+    document.getElementById('login-view').hidden = true;
+    document.getElementById('app-view').hidden = true;
+  }
+
+  function showLoginView() {
+    document.getElementById('app-splash').hidden = true;
+    document.getElementById('app-view').hidden = true;
+    document.getElementById('login-view').hidden = false;
+    // Default to email step
+    showLoginStep('email');
+    // Pre-fill last email if available
+    try {
+      const lastEmail = localStorage.getItem(STORAGE_KEYS.email);
+      if (lastEmail) {
+        const emailInput = document.getElementById('input-email');
+        if (emailInput) emailInput.value = lastEmail;
+      }
+    } catch (_) { /* ignore */ }
+  }
+
+  function showLoginStep(step) {
+    document.getElementById('login-step-email').hidden = step !== 'email';
+    document.getElementById('login-step-otp').hidden = step !== 'otp';
+    clearLoginAlert();
+    // Clear errors
+    clearFieldError(document.getElementById('email-error'), document.getElementById('input-email'));
+    clearFieldError(document.getElementById('otp-error'), document.getElementById('input-otp'));
+    if (step === 'otp') {
+      // Clear OTP input + auto-focus
+      const otpInput = document.getElementById('input-otp');
+      if (otpInput) {
+        otpInput.value = '';
+        setTimeout(() => otpInput.focus(), 100);
+      }
+      // Show pending email
+      const emailDisplay = document.getElementById('otp-email-display');
+      if (emailDisplay) emailDisplay.textContent = state.pendingEmail || '';
+    } else {
+      // Focus email input
+      setTimeout(() => {
+        const emailInput = document.getElementById('input-email');
+        if (emailInput) emailInput.focus();
+      }, 100);
+    }
+  }
+
+  function showAppView() {
+    document.getElementById('app-splash').hidden = true;
+    document.getElementById('login-view').hidden = true;
+    document.getElementById('app-view').hidden = false;
+    // Default view = dashboard
+    switchView('dashboard');
+    updateDynamicLabels();
+  }
+
+  // =================================================================
+  // [10] EVENT HANDLERS
+  // =================================================================
+
+  /**
+   * Login Step 1 — submit email → send OTP
+   */
+  async function onSubmitSendOtp(e) {
+    e.preventDefault();
+    clearLoginAlert();
+
+    const emailInput = document.getElementById('input-email');
+    const emailError = document.getElementById('email-error');
+    const btn = document.getElementById('btn-send-otp');
+
+    const email = emailInput.value;
+
+    if (!isValidEmail(email)) {
+      showFieldError(emailError, emailInput, 'error.invalidEmail');
+      emailInput.focus();
+      return;
+    }
+    clearFieldError(emailError, emailInput);
+
+    setButtonLoading(btn, true, 'login.sending');
+    try {
+      await sendOtp(email);
+      showToast('safe', 'toast.otpSentTitle', 'toast.otpSentMessage');
+      showLoginStep('otp');
+    } catch (err) {
+      console.error('[login] sendOtp failed:', err);
+      const msg = String(err && err.message || '');
+      if (msg.includes('invalid_email')) {
+        showFieldError(emailError, emailInput, 'error.invalidEmail');
+      } else if (/network|fetch/i.test(msg)) {
+        showLoginAlert('danger', 'error.network');
+      } else {
+        // เพื่อความปลอดภัย — ไม่บอกใบ้ว่า email มีในระบบหรือไม่
+        // แต่ถ้า shouldCreateUser=false + email ไม่มี → Supabase return error
+        showLoginAlert('danger', 'error.generic');
+      }
+    } finally {
+      setButtonLoading(btn, false);
+    }
+  }
+
+  /**
+   * Login Step 2 — submit OTP → verify + check admin
+   */
+  async function onSubmitVerifyOtp(e) {
+    e.preventDefault();
+    clearLoginAlert();
+
+    const otpInput = document.getElementById('input-otp');
+    const otpError = document.getElementById('otp-error');
+    const btn = document.getElementById('btn-verify-otp');
+
+    const code = String(otpInput.value || '').trim();
+
+    if (!/^\d{6}$/.test(code)) {
+      showFieldError(otpError, otpInput, 'error.invalidOtp');
+      otpInput.focus();
+      return;
+    }
+    clearFieldError(otpError, otpInput);
+
+    setButtonLoading(btn, true, 'login.verifying');
+    try {
+      const result = await verifyOtp(state.pendingEmail, code);
+      if (!result || !result.user) {
+        throw new Error('no_user_returned');
+      }
+      state.currentUser = result.user;
+
+      // Check admin
+      const adminCheck = await checkIsAdmin();
+      if (!adminCheck.isAdmin) {
+        // ไม่ใช่ admin → sign out + error
+        await sb.auth.signOut();
+        state.currentUser = null;
+        showLoginAlert('danger', 'error.notAdmin');
+        showLoginStep('email');
+        setButtonLoading(btn, false);
+        return;
+      }
+
+      state.isAdmin = true;
+      state.userRole = adminCheck.role;
+      state.userProfile = adminCheck.profile;
+
+      showToast('safe', 'toast.loginSuccessTitle', 'toast.loginSuccessMessage', { email: state.currentUser.email });
+      showAppView();
+    } catch (err) {
+      console.error('[login] verifyOtp failed:', err);
+      const msg = String(err && err.message || '');
+      if (/network|fetch/i.test(msg)) {
+        showLoginAlert('danger', 'error.network');
+      } else {
+        showLoginAlert('danger', 'error.otpFailed');
+      }
+      // Clear OTP input for retry
+      otpInput.value = '';
+      otpInput.focus();
+    } finally {
+      setButtonLoading(btn, false);
+    }
+  }
+
+  /**
+   * Resend OTP — trigger sendOtp อีกครั้ง
+   */
+  async function onClickResendOtp() {
+    if (!state.pendingEmail) {
+      showLoginStep('email');
+      return;
+    }
+    const btn = document.getElementById('btn-resend-otp');
+    setButtonLoading(btn, true, 'login.sending');
+    try {
+      await sendOtp(state.pendingEmail);
+      showToast('safe', 'toast.otpSentTitle', 'toast.otpSentMessage');
+    } catch (err) {
+      console.error('[login] resend failed:', err);
+      showLoginAlert('danger', 'error.generic');
+    } finally {
+      setButtonLoading(btn, false);
+    }
+  }
+
+  /**
+   * Back to email step
+   */
+  function onClickBackToEmail() {
+    state.pendingEmail = null;
+    showLoginStep('email');
+  }
+
+  /**
+   * Logout handler
+   */
+  async function onClickLogout() {
+    await signOut();
+  }
+
+  // =================================================================
+  // [11] BOOT SEQUENCE
+  // =================================================================
+  async function checkSessionOnBoot() {
+    try {
+      const { data: { session }, error } = await sb.auth.getSession();
+      if (error) {
+        console.warn('[boot] getSession error:', error);
+        showLoginView();
+        return;
+      }
+      if (!session || !session.user) {
+        showLoginView();
+        return;
+      }
+      // Session exists — verify admin
+      state.currentUser = session.user;
+      const adminCheck = await checkIsAdmin();
+      if (!adminCheck.isAdmin) {
+        // Session มี แต่ไม่ใช่ admin → force sign out
+        await sb.auth.signOut();
+        state.currentUser = null;
+        showLoginAlert('danger', 'error.notAdmin');
+        showLoginView();
+        return;
+      }
+      state.isAdmin = true;
+      state.userRole = adminCheck.role;
+      state.userProfile = adminCheck.profile;
+      showAppView();
+    } catch (e) {
+      console.error('[boot] unexpected error:', e);
+      showLoginView();
+    }
+  }
+
+  /**
+   * attachEventListeners() — ผูก handlers ทั้งหมด (หลัง DOM ready)
+   */
+  function attachEventListeners() {
+    // Forms
+    const formSend = document.getElementById('form-send-otp');
+    if (formSend) formSend.addEventListener('submit', onSubmitSendOtp);
+
+    const formVerify = document.getElementById('form-verify-otp');
+    if (formVerify) formVerify.addEventListener('submit', onSubmitVerifyOtp);
+
+    // Login buttons
+    const btnBack = document.getElementById('btn-back-to-email');
+    if (btnBack) btnBack.addEventListener('click', onClickBackToEmail);
+
+    const btnResend = document.getElementById('btn-resend-otp');
+    if (btnResend) btnResend.addEventListener('click', onClickResendOtp);
+
+    // Topbar: logout, theme
+    const btnLogout = document.getElementById('btn-logout');
+    if (btnLogout) btnLogout.addEventListener('click', onClickLogout);
+
+    const btnTheme = document.getElementById('btn-theme-toggle');
+    if (btnTheme) btnTheme.addEventListener('click', toggleTheme);
+
+    // Sidebar drawer (mobile)
+    const btnOpen = document.getElementById('btn-sidebar-open');
+    if (btnOpen) btnOpen.addEventListener('click', openSidebarDrawer);
+
+    const btnClose = document.getElementById('btn-sidebar-close');
+    if (btnClose) btnClose.addEventListener('click', closeSidebarDrawer);
+
+    const overlay = document.getElementById('sidebar-overlay');
+    if (overlay) overlay.addEventListener('click', closeSidebarDrawer);
+
+    // Nav items (views)
+    document.querySelectorAll('.t-nav-item[data-view]').forEach(item => {
+      item.addEventListener('click', function () {
+        if (this.classList.contains('is-disabled')) return;
+        const view = this.getAttribute('data-view');
+        switchView(view);
+      });
+    });
+
+    // Language toggle buttons (both login + topbar — ใช้ data-lang-btn attribute เดียวกัน)
+    document.querySelectorAll('[data-lang-btn]').forEach(btn => {
+      btn.addEventListener('click', function () {
+        const lang = this.getAttribute('data-lang-btn');
+        setLanguage(lang);
+      });
+    });
+
+    // Auto-format OTP input — allow only digits, auto-submit when 6 digits entered
+    const otpInput = document.getElementById('input-otp');
+    if (otpInput) {
+      otpInput.addEventListener('input', function () {
+        // ลบอักขระที่ไม่ใช่ตัวเลข
+        this.value = this.value.replace(/\D/g, '').slice(0, 6);
+        // Auto-submit เมื่อครบ 6 หลัก
+        if (this.value.length === 6) {
+          const form = document.getElementById('form-verify-otp');
+          if (form) form.dispatchEvent(new Event('submit', { cancelable: true }));
+        }
+      });
+      // Handle paste (e.g. from email or OS autofill)
+      otpInput.addEventListener('paste', function (e) {
+        const pasted = (e.clipboardData || window.clipboardData).getData('text');
+        const cleaned = String(pasted || '').replace(/\D/g, '').slice(0, 6);
+        if (cleaned.length === 6) {
+          e.preventDefault();
+          this.value = cleaned;
+          const form = document.getElementById('form-verify-otp');
+          if (form) form.dispatchEvent(new Event('submit', { cancelable: true }));
+        }
+      });
+    }
+
+    // ESC to close sidebar drawer
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') closeSidebarDrawer();
+    });
+
+    // Listen for Supabase auth state changes (token refresh, external logout, etc.)
+    sb.auth.onAuthStateChange(function (event, session) {
+      console.log('[auth-state]', event, session ? '(session exists)' : '(no session)');
+      if (event === 'SIGNED_OUT' || !session) {
+        // ถ้าระหว่างใช้งานถูก force logout (token expired + refresh failed)
+        if (state.isAdmin) {
+          // มี session เดิม แต่โดน invalidate
+          state.currentUser = null;
+          state.userProfile = null;
+          state.userRole = null;
+          state.isAdmin = false;
+          showLoginView();
+          showToast('warning', 'error.sessionExpired', null);
+        }
+      }
+    });
+  }
+
+  // =================================================================
+  // [12] INIT
+  // =================================================================
+  function init() {
+    // Load saved preferences first
+    loadTheme();
+    loadLanguage();
+    // Apply initial translations
+    applyTranslations();
+    // Attach event handlers
+    attachEventListeners();
+    // Check session + route to appropriate view
+    checkSessionOnBoot();
+  }
+
+  // DOM ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+  </script>
+</body>
+</html>
