@@ -1,10 +1,10 @@
 <!DOCTYPE html>
 <!--
   ================================================================
-  BE-TPP Admin Portal — Round C.1 (Foundation + Auth + Shell)
+  BE-TPP Admin Portal — Round C.3a (Edit Device Modal)
   ================================================================
-  Version:     v0.2.1 (patch: Bug #1 refresh feedback, Bug #2 actions align, Bug #3 owner/lastseen wrap)
-  Released:    20 April 2026
+  Version:     v0.3.0 (Round C.3a — Edit device modal + form + validation + row-click)
+  Released:    21 April 2026
   File:        be-tpp-admin.html
   Author:      Claude (AI pair programmer) + Warunyu
   Purpose:     Admin portal for Breatheeazy BE-TPP system
@@ -12,7 +12,7 @@
   Backend:     Supabase brgzimwzcfbwkgymqzvy (Mumbai AWS, FREE)
   DS:          Tactical-Lite v1.3.0 (selective copy)
 
-  --- Round C.1 + C.2 Scope ---
+  --- Rounds C.1 + C.2 + C.3a Scope ---
   [A] App shell + sidebar + topbar (responsive 3 viewports)          [C.1]
   [B] Email OTP authentication (2-step: email -> code)                [C.1]
   [C] Admin guard (is_admin() RPC check)                              [C.1]
@@ -22,10 +22,11 @@
   [G] Dashboard stat cards (devices/users/photos, live data)          [C.2]
   [H] Device list: search + filter chips + table/cards + pagination   [C.2]
   [I] Refresh controls + updated-at timestamp                         [C.2]
+  [J] Edit device modal + 15 fields + validation + B3 row-click       [C.3a]
 
-  --- Not in C.2 (coming later) ---
-  C.3: Edit device modal, Photo upload with client-side resize
-  C.4: PWA wrapper (manifest, service worker)
+  --- Not in C.3a (coming later) ---
+  C.3b: Photo upload with client-side resize + dropzone
+  C.4:  PWA wrapper (manifest, service worker)
   Round D: User management UI
 
   --- Code Style ---
@@ -915,6 +916,247 @@
     padding: 12px 8px;
     font-weight: 600;
   }
+
+  /* ==============================================================
+     [10b] SELECT + TEXTAREA  (Round C.3a — extend [10] FORM INPUTS)
+     ============================================================== */
+  .t-select {
+    /* inherits base styles from combined .t-input,.t-select,.t-textarea rule */
+    appearance: none;
+    background-image:
+      linear-gradient(45deg, transparent 50%, var(--text-low) 50%),
+      linear-gradient(135deg, var(--text-low) 50%, transparent 50%);
+    background-position: right 14px top 14px, right 9px top 14px;
+    background-size: 5px 5px, 5px 5px;
+    background-repeat: no-repeat;
+    padding-right: 32px;
+    cursor: pointer;
+  }
+  .t-select:hover:not(:disabled):not(.is-error) { border-color: var(--border-strong); }
+  .t-select:focus:not(.is-error) {
+    border-color: var(--color-primary);
+    box-shadow: var(--focus-ring);
+  }
+  .t-select.is-error { border-color: var(--color-danger); }
+  .t-select.is-error:focus { box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.20); }
+
+  .t-textarea {
+    min-height: 72px;
+    resize: vertical;
+    font-family: var(--font-sans);
+    line-height: var(--leading-snug);
+  }
+
+  /* Checkbox toggle row — for is_public flag in edit form */
+  .t-toggle-row {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    padding: 10px 14px;
+    background: var(--bg-input);
+    border: 1px solid var(--border-default);
+    border-radius: var(--r-md);
+    cursor: pointer;
+    transition: border-color var(--dur-fast) var(--ease-std);
+  }
+  .t-toggle-row:hover { border-color: var(--border-strong); }
+  .t-toggle-row input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--color-primary);
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .t-toggle-label {
+    font-size: var(--text-sm);
+    color: var(--text-high);
+    font-weight: 500;
+  }
+  .t-toggle-hint {
+    font-size: var(--text-2xs);
+    color: var(--text-low);
+    margin-left: auto;
+  }
+
+  /* Readonly display pair (label + value, non-editable) */
+  .t-readonly {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--r-md);
+    padding: 9px 14px;
+    font-size: var(--text-sm);
+    color: var(--text-medium);
+    line-height: 1.4;
+    min-height: 38px;
+    display: flex;
+    align-items: center;
+    word-break: break-word;
+  }
+  .t-readonly.is-mono {
+    font-family: var(--font-mono);
+    letter-spacing: 0.04em;
+  }
+
+  /* ==============================================================
+     [10c] MODAL / DIALOG  (Round C.3a — port from tactical-lite [20])
+     ============================================================== */
+  .t-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: var(--bg-overlay);
+    backdrop-filter: var(--blur-overlay);
+    -webkit-backdrop-filter: var(--blur-overlay);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: var(--z-modal);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--dur-normal) var(--ease-std);
+    padding: var(--sp-4);
+  }
+  .t-modal-backdrop.is-open {
+    opacity: 1;
+    pointer-events: all;
+  }
+
+  .t-modal {
+    background: var(--bg-panel);
+    border: 1px solid var(--border-default);
+    border-radius: var(--r-lg);
+    box-shadow: var(--shadow-lg);
+    width: 100%;
+    max-width: 560px;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    transform: scale(0.96) translateY(8px);
+    transition: transform var(--dur-normal) var(--ease-spring);
+    overflow: hidden;
+  }
+  .t-modal-backdrop.is-open .t-modal { transform: scale(1) translateY(0); }
+  .t-modal.v-danger  { border-color: var(--color-danger-border); }
+  .t-modal.v-warning { border-color: var(--color-warning-border); }
+  .t-modal.size-sm { max-width: 420px; }
+  .t-modal.size-lg { max-width: 720px; }
+  .t-modal.size-xl { max-width: 960px; }
+
+  .t-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--sp-4) var(--sp-5);
+    border-bottom: 1px solid var(--border-subtle);
+    flex-shrink: 0;
+    gap: var(--sp-3);
+  }
+  .t-modal-title {
+    font-family: var(--font-display);
+    font-size: var(--text-lg);
+    font-weight: 600;
+    color: var(--text-high);
+    letter-spacing: var(--tracking-tight);
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    min-width: 0;
+  }
+  .t-modal-title i { color: var(--color-primary); font-size: 20px; }
+  .t-modal.v-danger  .t-modal-title i { color: var(--color-danger); }
+  .t-modal.v-warning .t-modal-title i { color: var(--color-warning); }
+
+  .t-modal-close {
+    background: none;
+    border: 1px solid transparent;
+    color: var(--text-low);
+    width: 32px;
+    height: 32px;
+    border-radius: var(--r-sm);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: all var(--dur-fast) var(--ease-std);
+    flex-shrink: 0;
+  }
+  .t-modal-close:hover {
+    color: var(--text-high);
+    background: var(--bg-surface-hover);
+  }
+  .t-modal-close:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+  }
+  .t-modal-close i { font-size: 18px; }
+
+  .t-modal-body {
+    padding: var(--sp-5);
+    overflow-y: auto;
+    flex: 1;
+    color: var(--text-medium);
+    line-height: var(--leading-normal);
+  }
+
+  .t-modal-footer {
+    padding: var(--sp-4) var(--sp-5);
+    border-top: 1px solid var(--border-subtle);
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--sp-3);
+    flex-shrink: 0;
+    background: var(--bg-surface);
+  }
+  .t-modal-footer .t-footer-left {
+    margin-right: auto;
+    font-size: var(--text-2xs);
+    color: var(--text-low);
+  }
+
+  /* Edit form — 2-column grid layout */
+  .edit-form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--sp-5);
+  }
+  .edit-form-section-title {
+    font-family: var(--font-display);
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--text-high);
+    letter-spacing: var(--tracking-wide);
+    text-transform: uppercase;
+    margin: 0 0 var(--sp-3) 0;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border-subtle);
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+  }
+  .edit-form-section-title i {
+    color: var(--color-primary);
+    font-size: 14px;
+  }
+  .edit-form-section { min-width: 0; }
+
+  /* GPS row — lat + lng side-by-side within a section */
+  .edit-gps-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--sp-3);
+  }
+
+  /* Collapse to single column on small viewports */
+  @media (max-width: 700px) {
+    .edit-form-grid { grid-template-columns: 1fr; gap: var(--sp-4); }
+    .edit-gps-row   { grid-template-columns: 1fr; }
+  }
+
+  /* Make device rows clickable (B3 free win) */
+  #table-devices tbody tr { cursor: pointer; }
+  #table-devices tbody tr:hover { background: var(--bg-surface-hover); }
+  /* Prevent hover from causing layout shift when over interactive elements */
+  #table-devices tbody tr:has(button:hover) { background: transparent; }
 
   /* ==============================================================
      [11] ALERTS
@@ -2022,6 +2264,200 @@
     </main>
   </div>
 
+  <!-- ================================================================
+       [C.3a] Edit Device Modal
+       ================================================================ -->
+  <div class="t-modal-backdrop" id="modal-edit-device" role="dialog" aria-modal="true" aria-labelledby="modal-edit-title" hidden>
+    <div class="t-modal size-lg" role="document">
+      <header class="t-modal-header">
+        <h2 class="t-modal-title" id="modal-edit-title">
+          <i class="ti ti-edit" aria-hidden="true"></i>
+          <span data-i18n="edit.title">Edit device</span>
+        </h2>
+        <button type="button" class="t-modal-close" id="btn-edit-close" data-i18n-aria-label="common.close" aria-label="Close">
+          <i class="ti ti-x" aria-hidden="true"></i>
+        </button>
+      </header>
+
+      <div class="t-modal-body">
+        <!-- Save error alert (shown inline if admin_update_device returns error) -->
+        <div class="t-alert v-danger" id="edit-alert" hidden style="margin-bottom: var(--sp-4);">
+          <i class="ti ti-alert-circle" aria-hidden="true"></i>
+          <div>
+            <div class="t-alert-title" data-i18n="edit.saveErrorTitle">Save failed</div>
+            <div class="t-alert-body" id="edit-alert-message">&nbsp;</div>
+          </div>
+        </div>
+
+        <form id="edit-form" novalidate onsubmit="return false;">
+          <div class="edit-form-grid">
+
+            <!-- ============ Core section ============ -->
+            <div class="edit-form-section">
+              <h3 class="edit-form-section-title">
+                <i class="ti ti-device-desktop" aria-hidden="true"></i>
+                <span data-i18n="edit.sectionCore">Core</span>
+              </h3>
+
+              <div class="t-field">
+                <label class="t-label" data-i18n="edit.field.deviceId">Device ID</label>
+                <div class="t-readonly is-mono" id="edit-device-id">&nbsp;</div>
+              </div>
+
+              <div class="t-field">
+                <label class="t-label" data-i18n="edit.field.owner">Owner</label>
+                <div class="t-readonly" id="edit-owner">&nbsp;</div>
+              </div>
+
+              <div class="t-field">
+                <label class="t-label" for="edit-device-name" data-i18n="edit.field.deviceName">Device name</label>
+                <input type="text" class="t-input" id="edit-device-name" maxlength="100" autocomplete="off">
+                <div class="t-field-error" id="edit-device-name-error" hidden></div>
+              </div>
+
+              <div class="t-field">
+                <label class="t-label" for="edit-client-id" data-i18n="edit.field.clientId">Client ID</label>
+                <input type="text" class="t-input is-mono" id="edit-client-id" maxlength="50" autocomplete="off">
+                <div class="t-field-error" id="edit-client-id-error" hidden></div>
+              </div>
+
+              <div class="t-field">
+                <label class="t-label" data-i18n="edit.field.gps">GPS coordinates</label>
+                <div class="edit-gps-row">
+                  <div>
+                    <input type="number" class="t-input is-mono" id="edit-latitude" step="any" min="-90" max="90"
+                      data-i18n-placeholder="edit.field.latitude" placeholder="Latitude" autocomplete="off">
+                    <div class="t-field-error" id="edit-latitude-error" hidden></div>
+                  </div>
+                  <div>
+                    <input type="number" class="t-input is-mono" id="edit-longitude" step="any" min="-180" max="180"
+                      data-i18n-placeholder="edit.field.longitude" placeholder="Longitude" autocomplete="off">
+                    <div class="t-field-error" id="edit-longitude-error" hidden></div>
+                  </div>
+                </div>
+                <div class="t-field-hint" data-i18n="edit.field.gpsHint">Leave blank to keep current value. Ranges: lat -90..90, lng -180..180.</div>
+              </div>
+
+              <div class="t-field">
+                <label class="t-label" data-i18n="edit.field.visibility">Visibility</label>
+                <label class="t-toggle-row" for="edit-is-public">
+                  <input type="checkbox" id="edit-is-public">
+                  <span class="t-toggle-label" data-i18n="edit.field.isPublic">Public (visible on BEFF Map)</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- ============ BEFF Location section ============ -->
+            <div class="edit-form-section">
+              <h3 class="edit-form-section-title">
+                <i class="ti ti-map-pin" aria-hidden="true"></i>
+                <span data-i18n="edit.sectionBeff">BEFF Location</span>
+              </h3>
+
+              <div class="t-field">
+                <label class="t-label" for="edit-location-name" data-i18n="edit.field.locationName">Location name</label>
+                <input type="text" class="t-input" id="edit-location-name" maxlength="200" autocomplete="off">
+                <div class="t-field-error" id="edit-location-name-error" hidden></div>
+              </div>
+
+              <div class="t-field">
+                <label class="t-label" for="edit-photo-url" data-i18n="edit.field.photoUrl">Photo URL</label>
+                <input type="url" class="t-input" id="edit-photo-url" maxlength="500" autocomplete="off"
+                  placeholder="https://...">
+                <div class="t-field-hint" data-i18n="edit.field.photoUrlHint">Direct image URL. Upload widget arrives in C.3b.</div>
+                <div class="t-field-error" id="edit-photo-url-error" hidden></div>
+              </div>
+
+              <div class="t-field">
+                <label class="t-label" for="edit-category" data-i18n="edit.field.category">Category</label>
+                <input type="text" class="t-input" id="edit-category" list="edit-category-list" maxlength="50" autocomplete="off"
+                  placeholder="e.g. Public Library">
+                <datalist id="edit-category-list">
+                  <option value="Restaurant &amp; Cafe"></option>
+                  <option value="Hotel"></option>
+                  <option value="Healthcare"></option>
+                  <option value="Museum"></option>
+                  <option value="Public Library"></option>
+                  <option value="Park"></option>
+                  <option value="School"></option>
+                  <option value="Office"></option>
+                  <option value="Temple"></option>
+                  <option value="Shopping Mall"></option>
+                </datalist>
+              </div>
+
+              <div class="t-field">
+                <label class="t-label" for="edit-address" data-i18n="edit.field.address">Address</label>
+                <textarea class="t-textarea" id="edit-address" rows="2" maxlength="500"></textarea>
+              </div>
+
+              <div class="t-field">
+                <label class="t-label" for="edit-email" data-i18n="edit.field.email">Public email</label>
+                <input type="email" class="t-input" id="edit-email" maxlength="254" autocomplete="off"
+                  placeholder="contact@example.com">
+                <div class="t-field-error" id="edit-email-error" hidden></div>
+              </div>
+
+              <div class="t-field">
+                <label class="t-label" for="edit-phone" data-i18n="edit.field.phone">Public phone</label>
+                <input type="tel" class="t-input" id="edit-phone" maxlength="40" autocomplete="off"
+                  placeholder="+66 ...">
+              </div>
+
+              <div class="t-field">
+                <label class="t-label" for="edit-website" data-i18n="edit.field.website">Website</label>
+                <input type="url" class="t-input" id="edit-website" maxlength="500" autocomplete="off"
+                  placeholder="https://...">
+                <div class="t-field-error" id="edit-website-error" hidden></div>
+              </div>
+
+              <div class="t-field">
+                <label class="t-label" for="edit-google-place-id" data-i18n="edit.field.googlePlaceId">Google Place ID</label>
+                <input type="text" class="t-input is-mono" id="edit-google-place-id" maxlength="120" autocomplete="off">
+              </div>
+            </div>
+          </div>
+        </form>
+      </div>
+
+      <footer class="t-modal-footer">
+        <div class="t-footer-left" id="edit-dirty-indicator" hidden>
+          <i class="ti ti-circle-dot" aria-hidden="true"></i>
+          <span data-i18n="edit.unsavedChanges">Unsaved changes</span>
+        </div>
+        <button type="button" class="t-btn v-ghost" id="btn-edit-cancel" data-i18n="common.cancel">Cancel</button>
+        <button type="button" class="t-btn v-primary" id="btn-edit-save">
+          <i class="ti ti-device-floppy" aria-hidden="true"></i>
+          <span data-i18n="edit.save">Save changes</span>
+        </button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- ================================================================
+       [C.3a] Confirm-close Modal (shown when closing edit with dirty form)
+       ================================================================ -->
+  <div class="t-modal-backdrop" id="modal-confirm-close" role="dialog" aria-modal="true" aria-labelledby="modal-confirm-close-title" hidden>
+    <div class="t-modal size-sm v-warning" role="document">
+      <header class="t-modal-header">
+        <h2 class="t-modal-title" id="modal-confirm-close-title">
+          <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+          <span data-i18n="confirmClose.title">Discard changes?</span>
+        </h2>
+      </header>
+      <div class="t-modal-body">
+        <p data-i18n="confirmClose.message" style="margin: 0;">You have unsaved changes. Are you sure you want to close without saving?</p>
+      </div>
+      <footer class="t-modal-footer">
+        <button type="button" class="t-btn v-ghost" id="btn-confirm-close-no" data-i18n="confirmClose.keepEditing">Keep editing</button>
+        <button type="button" class="t-btn v-danger" id="btn-confirm-close-yes">
+          <i class="ti ti-trash" aria-hidden="true"></i>
+          <span data-i18n="confirmClose.discard">Discard</span>
+        </button>
+      </footer>
+    </div>
+  </div>
+
   <!-- Toast container -->
   <div id="t-toast-container" aria-live="polite" aria-atomic="false"></div>
 
@@ -2082,7 +2518,13 @@
     devicePageSize: 20,
     // Last-loaded timestamps
     dashboardLoadedAt: null,
-    devicesLoadedAt:   null   // Bug#1 fix: track device list refresh time
+    devicesLoadedAt:   null,  // Bug#1 fix: track device list refresh time
+    // Round C.3a: edit modal state
+    editingDevice:    null,   // canonical normalized device (from state.devices) being edited
+    editFormTouched:  false,  // true when user modified any field — triggers confirm-close
+    editSaving:       false,  // true while admin_update_device RPC is in-flight
+    editLastFocus:    null,   // element that opened modal (restore focus on close)
+    editTrapHandler:  null    // Tab-key trap handler (attached when modal opens)
   };
 
   // =================================================================
@@ -2218,7 +2660,54 @@
       'toast.themeChangedTitle': 'Theme changed',
 
       // Aria labels
-      'aria.closeToast': 'Close notification'
+      'aria.closeToast': 'Close notification',
+
+      // ==== Round C.3a: Edit device modal ====
+      'edit.title': 'Edit device',
+      'edit.sectionCore': 'Core',
+      'edit.sectionBeff': 'BEFF Location',
+      'edit.field.deviceId': 'Device ID',
+      'edit.field.owner': 'Owner',
+      'edit.field.deviceName': 'Device name',
+      'edit.field.clientId': 'Client ID',
+      'edit.field.gps': 'GPS coordinates',
+      'edit.field.latitude': 'Latitude',
+      'edit.field.longitude': 'Longitude',
+      'edit.field.gpsHint': 'Leave blank to keep current value. Ranges: lat -90..90, lng -180..180.',
+      'edit.field.visibility': 'Visibility',
+      'edit.field.isPublic': 'Public (visible on BEFF Map)',
+      'edit.field.locationName': 'Location name',
+      'edit.field.photoUrl': 'Photo URL',
+      'edit.field.photoUrlHint': 'Direct image URL. Upload widget arrives in C.3b.',
+      'edit.field.category': 'Category',
+      'edit.field.address': 'Address',
+      'edit.field.email': 'Public email',
+      'edit.field.phone': 'Public phone',
+      'edit.field.website': 'Website',
+      'edit.field.googlePlaceId': 'Google Place ID',
+      'edit.save': 'Save changes',
+      'edit.saving': 'Saving...',
+      'edit.unsavedChanges': 'Unsaved changes',
+      'edit.saveErrorTitle': 'Save failed',
+      'edit.noChangesTitle': 'No changes',
+      'edit.noChangesMessage': 'You have not modified any fields.',
+      'edit.saveSuccessTitle': 'Device updated',
+      'edit.saveSuccessMessage': 'Changes saved successfully.',
+
+      // ==== Round C.3a: Form validation ====
+      'validation.latitudeRange': 'Latitude must be between -90 and 90.',
+      'validation.longitudeRange': 'Longitude must be between -180 and 180.',
+      'validation.emailFormat': 'Please enter a valid email address.',
+      'validation.urlFormat': 'Please enter a valid URL (starting with http:// or https://).',
+      'validation.required': 'This field cannot be empty.',
+      'validation.tooLong': 'This value is too long.',
+      'validation.fixErrors': 'Please fix the highlighted errors.',
+
+      // ==== Round C.3a: Confirm-close modal ====
+      'confirmClose.title': 'Discard changes?',
+      'confirmClose.message': 'You have unsaved changes. Are you sure you want to close without saving?',
+      'confirmClose.keepEditing': 'Keep editing',
+      'confirmClose.discard': 'Discard'
     },
     th: {
       // App
@@ -2349,7 +2838,54 @@
       'toast.themeChangedTitle': 'เปลี่ยนธีมแล้ว',
 
       // Aria labels
-      'aria.closeToast': 'ปิดการแจ้งเตือน'
+      'aria.closeToast': 'ปิดการแจ้งเตือน',
+
+      // ==== Round C.3a: Edit device modal ====
+      'edit.title': 'แก้ไขอุปกรณ์',
+      'edit.sectionCore': 'ข้อมูลหลัก',
+      'edit.sectionBeff': 'BEFF Location',
+      'edit.field.deviceId': 'Device ID',
+      'edit.field.owner': 'เจ้าของ',
+      'edit.field.deviceName': 'ชื่ออุปกรณ์',
+      'edit.field.clientId': 'Client ID',
+      'edit.field.gps': 'พิกัด GPS',
+      'edit.field.latitude': 'ละติจูด',
+      'edit.field.longitude': 'ลองจิจูด',
+      'edit.field.gpsHint': 'เว้นว่างเพื่อคงค่าเดิม (lat -90..90, lng -180..180)',
+      'edit.field.visibility': 'การมองเห็น',
+      'edit.field.isPublic': 'สาธารณะ (แสดงบน BEFF Map)',
+      'edit.field.locationName': 'ชื่อสถานที่',
+      'edit.field.photoUrl': 'Photo URL',
+      'edit.field.photoUrlHint': 'URL รูปภาพโดยตรง — ฟีเจอร์อัปโหลดจะมาใน C.3b',
+      'edit.field.category': 'หมวดหมู่',
+      'edit.field.address': 'ที่อยู่',
+      'edit.field.email': 'อีเมลสาธารณะ',
+      'edit.field.phone': 'โทรศัพท์สาธารณะ',
+      'edit.field.website': 'เว็บไซต์',
+      'edit.field.googlePlaceId': 'Google Place ID',
+      'edit.save': 'บันทึกการเปลี่ยนแปลง',
+      'edit.saving': 'กำลังบันทึก...',
+      'edit.unsavedChanges': 'ยังไม่ได้บันทึก',
+      'edit.saveErrorTitle': 'บันทึกไม่สำเร็จ',
+      'edit.noChangesTitle': 'ไม่มีการเปลี่ยนแปลง',
+      'edit.noChangesMessage': 'คุณยังไม่ได้แก้ไขฟิลด์ใดๆ',
+      'edit.saveSuccessTitle': 'อัปเดตอุปกรณ์แล้ว',
+      'edit.saveSuccessMessage': 'บันทึกการเปลี่ยนแปลงเรียบร้อยแล้ว',
+
+      // ==== Round C.3a: Form validation ====
+      'validation.latitudeRange': 'ละติจูดต้องอยู่ระหว่าง -90 ถึง 90',
+      'validation.longitudeRange': 'ลองจิจูดต้องอยู่ระหว่าง -180 ถึง 180',
+      'validation.emailFormat': 'กรุณากรอกอีเมลให้ถูกต้อง',
+      'validation.urlFormat': 'กรุณากรอก URL ให้ถูกต้อง (ต้องขึ้นต้นด้วย http:// หรือ https://)',
+      'validation.required': 'ฟิลด์นี้ห้ามเว้นว่าง',
+      'validation.tooLong': 'ค่าที่กรอกยาวเกินกำหนด',
+      'validation.fixErrors': 'กรุณาแก้ไขฟิลด์ที่มีข้อผิดพลาด',
+
+      // ==== Round C.3a: Confirm-close modal ====
+      'confirmClose.title': 'ยกเลิกการแก้ไข?',
+      'confirmClose.message': 'มีการแก้ไขที่ยังไม่ได้บันทึก ต้องการปิดโดยไม่บันทึกหรือไม่?',
+      'confirmClose.keepEditing': 'แก้ไขต่อ',
+      'confirmClose.discard': 'ยกเลิก'
     }
   };
 
@@ -3365,7 +3901,8 @@
         // Actions
         '<td data-label="' + sanitizeHTML(t('devices.col.actions')) + '" class="t-cell-actions">' +
           '<button type="button" class="t-btn v-ghost btn-sm" data-action="edit" data-device-id="' +
-            sanitizeHTML(devId) + '" title="' + sanitizeHTML(t('devices.editSoon')) + '">' +
+            sanitizeHTML(devId) + '" title="' + sanitizeHTML(t('edit.title')) + '" aria-label="' +
+            sanitizeHTML(t('edit.title')) + '">' +
             '<i class="ti ti-edit"></i>' +
           '</button>' +
         '</td>' +
@@ -3448,6 +3985,494 @@
       ensureDevicesLoaded(true);
     }
   };
+
+  // =================================================================
+  // [8e] EDIT DEVICE MODAL (Round C.3a)
+  //  - openEditModal(device)        bind form fields + open modal + focus trap
+  //  - closeEditModal(force)        close (with confirm if dirty)
+  //  - validateEditForm()           validate all fields → returns {ok, errors}
+  //  - onSaveEditForm()             call admin_update_device RPC + refresh + close
+  //  - isValidUrl(str)              URL validator (http/https only)
+  //  - normalizeFieldValue(v)       '' → null, trim strings
+  //  - Focus trap + ESC + backdrop-click + dirty confirm
+  //  - B3 row-click handler (open modal when clicking anywhere on tr)
+  // =================================================================
+
+  /**
+   * EDIT_FIELD_MAP — maps form input IDs to { deviceKey (in _raw), rpcArg, type }
+   * Used for bind + dirty diff + payload build.
+   * Note: Uses _raw (snake_case) for reading, because RPC args are snake_case.
+   */
+  const EDIT_FIELD_MAP = [
+    { id: 'edit-device-name',      rawKey: 'device_name',      rpcArg: 'p_device_name',      type: 'text' },
+    { id: 'edit-client-id',        rawKey: 'client_id',        rpcArg: 'p_client_id',        type: 'text' },
+    { id: 'edit-latitude',         rawKey: 'latitude',         rpcArg: 'p_latitude',         type: 'number' },
+    { id: 'edit-longitude',        rawKey: 'longitude',        rpcArg: 'p_longitude',        type: 'number' },
+    { id: 'edit-is-public',        rawKey: 'is_public',        rpcArg: 'p_is_public',        type: 'bool' },
+    { id: 'edit-location-name',    rawKey: 'location_name',    rpcArg: 'p_location_name',    type: 'text' },
+    { id: 'edit-photo-url',        rawKey: 'photo_url',        rpcArg: 'p_photo_url',        type: 'text' },
+    { id: 'edit-category',         rawKey: 'category',         rpcArg: 'p_category',         type: 'text' },
+    { id: 'edit-address',          rawKey: 'address',          rpcArg: 'p_address',          type: 'text' },
+    { id: 'edit-email',            rawKey: 'email',            rpcArg: 'p_email',            type: 'text' },
+    { id: 'edit-phone',            rawKey: 'phone',            rpcArg: 'p_phone',            type: 'text' },
+    { id: 'edit-website',          rawKey: 'website',          rpcArg: 'p_website',          type: 'text' },
+    { id: 'edit-google-place-id',  rawKey: 'google_place_id',  rpcArg: 'p_google_place_id',  type: 'text' }
+  ];
+
+  /**
+   * isValidUrl(str) — accepts http:// or https:// URLs
+   */
+  function isValidUrl(str) {
+    if (typeof str !== 'string') return false;
+    const s = str.trim();
+    if (!s) return false;
+    try {
+      const u = new URL(s);
+      return u.protocol === 'http:' || u.protocol === 'https:';
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /**
+   * getFocusable(root) — find tab-reachable elements inside a container
+   */
+  function getFocusable(root) {
+    if (!root) return [];
+    const sel = 'button:not([disabled]), [href], input:not([disabled]):not([type="hidden"]), ' +
+                'select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    return Array.from(root.querySelectorAll(sel)).filter(el => !el.hidden && el.offsetParent !== null);
+  }
+
+  /**
+   * bindEditForm(device) — populate all form fields from device._raw
+   */
+  function bindEditForm(device) {
+    const raw = device && device._raw ? device._raw : {};
+
+    // Read-only displays
+    const devId = device.deviceId || '—';
+    document.getElementById('edit-device-id').textContent = devId;
+
+    let ownerDisplay = '';
+    if (device.ownerName && device.ownerEmail && device.ownerName !== device.ownerEmail) {
+      ownerDisplay = device.ownerName + ' (' + device.ownerEmail + ')';
+    } else if (device.ownerEmail) {
+      ownerDisplay = device.ownerEmail;
+    } else if (device.ownerName) {
+      ownerDisplay = device.ownerName;
+    } else {
+      ownerDisplay = t('common.unknown');
+    }
+    document.getElementById('edit-owner').textContent = ownerDisplay;
+
+    // Editable fields
+    EDIT_FIELD_MAP.forEach(function (f) {
+      const el = document.getElementById(f.id);
+      if (!el) return;
+      const val = raw[f.rawKey];
+      if (f.type === 'bool') {
+        el.checked = val === true;
+      } else if (f.type === 'number') {
+        el.value = (val == null || val === '') ? '' : String(val);
+      } else {
+        el.value = val == null ? '' : String(val);
+      }
+    });
+
+    // Clear any lingering error states
+    clearAllEditFieldErrors();
+    const alertEl = document.getElementById('edit-alert');
+    if (alertEl) alertEl.hidden = true;
+
+    state.editFormTouched = false;
+    updateDirtyIndicator();
+  }
+
+  function clearAllEditFieldErrors() {
+    const ids = ['edit-device-name', 'edit-client-id', 'edit-latitude', 'edit-longitude',
+                 'edit-location-name', 'edit-photo-url', 'edit-email', 'edit-website'];
+    ids.forEach(function (id) {
+      const inp = document.getElementById(id);
+      const err = document.getElementById(id + '-error');
+      if (inp) inp.classList.remove('is-error');
+      if (err) { err.hidden = true; err.textContent = ''; }
+    });
+  }
+
+  function setFieldError(inputId, msgKey) {
+    const inp = document.getElementById(inputId);
+    const err = document.getElementById(inputId + '-error');
+    if (inp) inp.classList.add('is-error');
+    if (err) {
+      err.textContent = t(msgKey);
+      err.hidden = false;
+    }
+  }
+
+  function clearFieldErrorById(inputId) {
+    const inp = document.getElementById(inputId);
+    const err = document.getElementById(inputId + '-error');
+    if (inp) inp.classList.remove('is-error');
+    if (err) { err.hidden = true; err.textContent = ''; }
+  }
+
+  function updateDirtyIndicator() {
+    const ind = document.getElementById('edit-dirty-indicator');
+    if (ind) ind.hidden = !state.editFormTouched;
+  }
+
+  /**
+   * validateEditForm() — validate all fields, return {ok: bool, errors: [{id, key}]}
+   * Side-effect: applies is-error + error messages inline.
+   */
+  function validateEditForm() {
+    clearAllEditFieldErrors();
+    const errors = [];
+
+    // Latitude
+    const latStr = (document.getElementById('edit-latitude').value || '').trim();
+    if (latStr !== '') {
+      const lat = Number(latStr);
+      if (!isFinite(lat) || lat < -90 || lat > 90) {
+        setFieldError('edit-latitude', 'validation.latitudeRange');
+        errors.push({ id: 'edit-latitude', key: 'validation.latitudeRange' });
+      }
+    }
+
+    // Longitude
+    const lngStr = (document.getElementById('edit-longitude').value || '').trim();
+    if (lngStr !== '') {
+      const lng = Number(lngStr);
+      if (!isFinite(lng) || lng < -180 || lng > 180) {
+        setFieldError('edit-longitude', 'validation.longitudeRange');
+        errors.push({ id: 'edit-longitude', key: 'validation.longitudeRange' });
+      }
+    }
+
+    // BEFF email (optional, but if non-empty must be valid)
+    const emailStr = (document.getElementById('edit-email').value || '').trim();
+    if (emailStr !== '' && !isValidEmail(emailStr)) {
+      setFieldError('edit-email', 'validation.emailFormat');
+      errors.push({ id: 'edit-email', key: 'validation.emailFormat' });
+    }
+
+    // Photo URL (optional, but if non-empty must be valid URL)
+    const photoStr = (document.getElementById('edit-photo-url').value || '').trim();
+    if (photoStr !== '' && !isValidUrl(photoStr)) {
+      setFieldError('edit-photo-url', 'validation.urlFormat');
+      errors.push({ id: 'edit-photo-url', key: 'validation.urlFormat' });
+    }
+
+    // Website (optional, but if non-empty must be valid URL)
+    const webStr = (document.getElementById('edit-website').value || '').trim();
+    if (webStr !== '' && !isValidUrl(webStr)) {
+      setFieldError('edit-website', 'validation.urlFormat');
+      errors.push({ id: 'edit-website', key: 'validation.urlFormat' });
+    }
+
+    return { ok: errors.length === 0, errors: errors };
+  }
+
+  /**
+   * buildUpdatePayload() — read form, compare vs device._raw, return only changed args.
+   * Returns { p_user_id, p_device_id, ...only-changed-fields }.
+   * Empty strings in text fields are sent as null (clears the field — admin_update_device
+   * uses COALESCE, so NULL = keep old. To actually clear a field you'd need direct SQL,
+   * but for now empty string == no change to stay consistent with customer update_device).
+   */
+  function buildUpdatePayload(device) {
+    const raw = device && device._raw ? device._raw : {};
+    const payload = {
+      p_user_id: getField(raw, 'user_id', 'userId'),
+      p_device_id: getField(raw, 'device_id', 'deviceId')
+    };
+    let changedCount = 0;
+
+    EDIT_FIELD_MAP.forEach(function (f) {
+      const el = document.getElementById(f.id);
+      if (!el) return;
+      const oldVal = raw[f.rawKey];
+      let newVal;
+
+      if (f.type === 'bool') {
+        newVal = el.checked === true;
+      } else if (f.type === 'number') {
+        const s = (el.value || '').trim();
+        newVal = s === '' ? null : Number(s);
+      } else {
+        const s = (el.value || '').trim();
+        newVal = s === '' ? null : s;
+      }
+
+      // Diff: compare normalized forms
+      const oldNorm = (f.type === 'bool')
+        ? (oldVal === true)
+        : (oldVal == null || oldVal === '' ? null : (f.type === 'number' ? Number(oldVal) : String(oldVal)));
+      const newNorm = newVal;
+
+      if (oldNorm !== newNorm) {
+        // Value differs — include in payload
+        // For text/number, null means "no change" per RPC COALESCE semantics,
+        // BUT we want to skip unchanged fields anyway, so always send the new value.
+        payload[f.rpcArg] = newVal;
+        changedCount++;
+      }
+    });
+
+    return { payload: payload, changedCount: changedCount };
+  }
+
+  /**
+   * openEditModal(device) — show modal, bind fields, setup focus trap + ESC
+   */
+  function openEditModal(device) {
+    if (!device) return;
+    state.editingDevice = device;
+    state.editLastFocus = document.activeElement;
+
+    bindEditForm(device);
+
+    const modal = document.getElementById('modal-edit-device');
+    modal.hidden = false;
+    // Force a repaint before adding class so the opacity transition plays
+    // eslint-disable-next-line no-unused-expressions
+    modal.offsetHeight;
+    modal.classList.add('is-open');
+    document.body.style.overflow = 'hidden';
+
+    // Auto-focus first editable input
+    setTimeout(function () {
+      const first = document.getElementById('edit-device-name');
+      if (first) first.focus();
+    }, 60);
+
+    // Tab-key focus trap
+    state.editTrapHandler = function (e) {
+      if (e.key !== 'Tab') return;
+      const items = getFocusable(modal);
+      if (!items.length) { e.preventDefault(); return; }
+      const first = items[0], last = items[items.length - 1];
+      if (e.shiftKey) {
+        if (document.activeElement === first) { e.preventDefault(); last.focus(); }
+      } else {
+        if (document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
+    };
+    modal.addEventListener('keydown', state.editTrapHandler);
+  }
+
+  /**
+   * closeEditModal(force) — close modal; if dirty and !force → show confirm-close modal
+   */
+  function closeEditModal(force) {
+    if (state.editSaving) return;  // don't close during save
+    if (!force && state.editFormTouched) {
+      openConfirmCloseModal();
+      return;
+    }
+    const modal = document.getElementById('modal-edit-device');
+    modal.classList.remove('is-open');
+    setTimeout(function () {
+      modal.hidden = true;
+    }, 240);  // match --dur-normal
+    document.body.style.overflow = '';
+
+    if (state.editTrapHandler) {
+      modal.removeEventListener('keydown', state.editTrapHandler);
+      state.editTrapHandler = null;
+    }
+    if (state.editLastFocus && typeof state.editLastFocus.focus === 'function') {
+      state.editLastFocus.focus();
+    }
+    state.editingDevice = null;
+    state.editLastFocus = null;
+    state.editFormTouched = false;
+  }
+
+  function openConfirmCloseModal() {
+    const m = document.getElementById('modal-confirm-close');
+    m.hidden = false;
+    // eslint-disable-next-line no-unused-expressions
+    m.offsetHeight;
+    m.classList.add('is-open');
+    setTimeout(function () {
+      const btn = document.getElementById('btn-confirm-close-no');
+      if (btn) btn.focus();
+    }, 60);
+  }
+
+  function closeConfirmCloseModal() {
+    const m = document.getElementById('modal-confirm-close');
+    m.classList.remove('is-open');
+    setTimeout(function () { m.hidden = true; }, 240);
+  }
+
+  /**
+   * onSaveEditForm() — validate + build payload + call admin_update_device + refresh list
+   */
+  async function onSaveEditForm() {
+    if (state.editSaving || !state.editingDevice) return;
+
+    // Hide any previous save-error alert
+    const alertEl = document.getElementById('edit-alert');
+    const alertMsg = document.getElementById('edit-alert-message');
+    if (alertEl) alertEl.hidden = true;
+
+    // Validate
+    const v = validateEditForm();
+    if (!v.ok) {
+      showToast('danger', 'common.error', 'validation.fixErrors');
+      // Focus first error
+      const firstErr = document.getElementById(v.errors[0].id);
+      if (firstErr) firstErr.focus();
+      return;
+    }
+
+    // Build payload — only changed fields
+    const built = buildUpdatePayload(state.editingDevice);
+    if (built.changedCount === 0) {
+      showToast('info', 'edit.noChangesTitle', 'edit.noChangesMessage');
+      return;
+    }
+
+    const btn = document.getElementById('btn-edit-save');
+    state.editSaving = true;
+    setButtonLoading(btn, true, 'edit.saving');
+
+    try {
+      const { data, error } = await sb.rpc('admin_update_device', built.payload);
+      if (error) throw error;
+      if (data && data.success === false) {
+        throw new Error(data.message || 'admin_update_device returned failure');
+      }
+
+      // Invalidate cache + refresh device list
+      state.devices = null;
+      await ensureDevicesLoaded(true);
+
+      showToast('safe', 'edit.saveSuccessTitle', 'edit.saveSuccessMessage');
+
+      // Force close (bypass dirty confirm)
+      state.editFormTouched = false;
+      closeEditModal(true);
+    } catch (err) {
+      console.error('[edit] admin_update_device failed:', err);
+      const msg = (err && err.message) ? String(err.message) : 'Unknown error';
+      if (alertEl && alertMsg) {
+        alertMsg.textContent = msg;
+        alertEl.hidden = false;
+      }
+      showToast('danger', 'edit.saveErrorTitle', null);
+    } finally {
+      state.editSaving = false;
+      setButtonLoading(btn, false);
+    }
+  }
+
+  /**
+   * openEditModalForDeviceId(devId) — look up device by id from state.devices and open modal
+   * Used by edit button clicks AND B3 row-click.
+   */
+  function openEditModalForDeviceId(devId) {
+    if (!devId) return;
+    if (!Array.isArray(state.devices)) {
+      console.warn('[edit] device list not loaded — cannot open modal');
+      return;
+    }
+    const device = state.devices.find(function (d) { return d.deviceId === devId; });
+    if (!device) {
+      console.warn('[edit] device not found in state.devices:', devId);
+      showToast('danger', 'common.error', null);
+      return;
+    }
+    openEditModal(device);
+  }
+
+  /**
+   * attachEditModalHandlers() — wire up all modal buttons + inputs
+   *  Called once from attachEventListeners().
+   */
+  function attachEditModalHandlers() {
+    const modal = document.getElementById('modal-edit-device');
+    const form = document.getElementById('edit-form');
+    const closeBtn = document.getElementById('btn-edit-close');
+    const cancelBtn = document.getElementById('btn-edit-cancel');
+    const saveBtn = document.getElementById('btn-edit-save');
+    const confirmModal = document.getElementById('modal-confirm-close');
+    const confirmYes = document.getElementById('btn-confirm-close-yes');
+    const confirmNo = document.getElementById('btn-confirm-close-no');
+
+    // Close buttons
+    closeBtn.addEventListener('click', function () { closeEditModal(false); });
+    cancelBtn.addEventListener('click', function () { closeEditModal(false); });
+    saveBtn.addEventListener('click', onSaveEditForm);
+
+    // Backdrop click (click outside the inner .t-modal)
+    modal.addEventListener('click', function (e) {
+      if (e.target === modal) closeEditModal(false);
+    });
+
+    // ESC key — close whichever modal is topmost
+    document.addEventListener('keydown', function (e) {
+      if (e.key !== 'Escape') return;
+      if (!confirmModal.hidden) {
+        closeConfirmCloseModal();
+        return;
+      }
+      if (!modal.hidden) {
+        closeEditModal(false);
+      }
+    });
+
+    // Confirm-close dialog buttons
+    confirmNo.addEventListener('click', function () { closeConfirmCloseModal(); });
+    confirmYes.addEventListener('click', function () {
+      closeConfirmCloseModal();
+      closeEditModal(true);  // force
+    });
+    confirmModal.addEventListener('click', function (e) {
+      if (e.target === confirmModal) closeConfirmCloseModal();
+    });
+
+    // Mark form dirty on any input/change
+    form.addEventListener('input', function () {
+      if (!state.editFormTouched) {
+        state.editFormTouched = true;
+        updateDirtyIndicator();
+      }
+    });
+    form.addEventListener('change', function () {
+      if (!state.editFormTouched) {
+        state.editFormTouched = true;
+        updateDirtyIndicator();
+      }
+    });
+
+    // Live-validate on blur for fields with validators
+    ['edit-latitude', 'edit-longitude', 'edit-email', 'edit-photo-url', 'edit-website'].forEach(function (id) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.addEventListener('blur', function () {
+        // Re-run full validation but only show errors for this field
+        // (simpler: just revalidate this field)
+        const v = el.value.trim();
+        clearFieldErrorById(id);
+        if (v === '') return;
+        if (id === 'edit-latitude') {
+          const n = Number(v);
+          if (!isFinite(n) || n < -90 || n > 90) setFieldError(id, 'validation.latitudeRange');
+        } else if (id === 'edit-longitude') {
+          const n = Number(v);
+          if (!isFinite(n) || n < -180 || n > 180) setFieldError(id, 'validation.longitudeRange');
+        } else if (id === 'edit-email') {
+          if (!isValidEmail(v)) setFieldError(id, 'validation.emailFormat');
+        } else if (id === 'edit-photo-url' || id === 'edit-website') {
+          if (!isValidUrl(v)) setFieldError(id, 'validation.urlFormat');
+        }
+      });
+    });
+  }
 
   // =================================================================
   // [9] VIEW TRANSITIONS
@@ -3855,13 +4880,34 @@
       });
     });
 
-    // Delegated handler for Edit action button (fires toast for now — real modal in C.3)
+    // Delegated handler for Edit action + B3 row-click (Round C.3a)
+    //  - Click on [data-action="edit"] button → open edit modal
+    //  - Click anywhere else on a device row (tr with data-device-id) → open edit modal (B3 free win)
+    //  - Click on .t-card (mobile) with data-device-id → open edit modal
+    //  - Click on interactive children (input/select/other buttons) is NOT hijacked
     document.getElementById('view-devices').addEventListener('click', function (e) {
-      const btn = e.target.closest('[data-action="edit"]');
-      if (btn) {
-        showToast('info', 'devices.editSoon', null);
+      // Priority 1: Explicit edit action button
+      const editBtn = e.target.closest('[data-action="edit"]');
+      if (editBtn) {
+        e.preventDefault();
+        const devId = editBtn.getAttribute('data-device-id');
+        openEditModalForDeviceId(devId);
+        return;
+      }
+
+      // Priority 2: Row click (B3). Only if the click did NOT land on an interactive element.
+      const interactive = e.target.closest('button, a, input, select, textarea, label');
+      if (interactive) return;
+
+      const row = e.target.closest('tr[data-device-id], [data-device-id].t-card, [data-device-id].t-card-mobile');
+      if (row) {
+        const devId = row.getAttribute('data-device-id');
+        openEditModalForDeviceId(devId);
       }
     });
+
+    // Wire up the Edit modal + Confirm-close modal (Round C.3a)
+    attachEditModalHandlers();
 
     // Re-render dynamic labels when language changes (time strings, counts, etc.)
     document.addEventListener('lang-changed', function () {
