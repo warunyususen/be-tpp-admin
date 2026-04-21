@@ -1,18 +1,18 @@
 <!DOCTYPE html>
 <!--
   ================================================================
-  BE-TPP Admin Portal — Round C.3a + patch1
+  BE-TPP Admin Portal — Round C.3b (Photo Upload Pipeline)
   ================================================================
-  Version:     v0.3.1 (patch1: composite-key fix for shared devices + mobile owner alignment)
-  Released:    21 April 2026
+  Version:     v0.4.0 (C.3b: Dropzone + Canvas resize + Storage upload + delete-old)
+  Released:    22 April 2026
   File:        be-tpp-admin.html
   Author:      Claude (AI pair programmer) + Warunyu
   Purpose:     Admin portal for Breatheeazy BE-TPP system
   Target:      Hugh (owner, British) + Tarn (admin helper)
   Backend:     Supabase brgzimwzcfbwkgymqzvy (Mumbai AWS, FREE)
-  DS:          Tactical-Lite v1.3.0 (selective copy)
+  DS:          Tactical-Lite v1.3.0 (selective copy + Upload section [28] ported)
 
-  --- Rounds C.1 + C.2 + C.3a + patch1 Scope ---
+  --- Rounds C.1 + C.2 + C.3a + patch1 + C.3b Scope ---
   [A] App shell + sidebar + topbar (responsive 3 viewports)          [C.1]
   [B] Email OTP authentication (2-step: email -> code)                [C.1]
   [C] Admin guard (is_admin() RPC check)                              [C.1]
@@ -23,8 +23,9 @@
   [H] Device list: search + filter chips + table/cards + pagination   [C.2]
   [I] Refresh controls + updated-at timestamp                         [C.2]
   [J] Edit device modal + 15 fields + validation + B3 row-click       [C.3a]
+  [K] Photo upload: dropzone + resize + Storage + delete-old          [C.3b] NEW
 
-  --- patch1 (v0.3.1) — critical bug fixes ---
+  --- patch1 (v0.3.1) — critical bug fixes (PRESERVED in v0.4.0) ---
   [Q2.3] Composite-key lookup: ใช้ (user_id, device_id) แทน device_id เดี่ยว
          เดิม .find() คืน record แรกเสมอ → เปิด modal ผิด owner เมื่อ device
          ถูก share ระหว่างหลาย user (เช่น 582D34712B43 = hugh/warunyu/fatih+1)
@@ -32,8 +33,25 @@
   [Q2.4] Mobile owner cell: เพิ่ม text-align:right ให้ name+email ชิดขวา
          เหมือน single-email rows (cosmetic)
 
-  --- Not in v0.3.1 (coming later) ---
-  C.3b: Photo upload with client-side resize + dropzone (→ next chat)
+  --- Round C.3b (v0.4.0) — Photo Upload Pipeline ---
+  [K-1] CSS section [10d] UPLOAD / DROPZONE (ported from DS [28] + spinner state)
+  [K-2] Hybrid photo field: dropzone (primary) + URL input (secondary for reuse)
+  [K-3] Client-side resize: Canvas → WebP quality 0.85 (JPEG fallback) → max 1600x1200
+  [K-4] Upload path: {admin_user_id}/{device_id}/{timestamp}.{ext}
+        (admin's UID as folder root for audit — NOT device owner's UID)
+  [K-5] Delete old photo: best-effort AFTER admin_update_device succeeds
+        (only if old URL is in our device-photos bucket)
+  [K-6] Pending-orphan cleanup: if admin uploads then uploads again before save,
+        the first uploaded URL is deleted. If modal is discarded, pending is deleted too.
+  [K-7] Drag-drop via DataTransfer (not implemented in DS v1.3.0)
+  [K-8] Preview card: thumbnail + filename + size + × remove button
+  [K-9] Error states: too large (>5MB), wrong MIME, upload failed
+  [K-10] Integration: extends bindEditForm/onSaveEditForm/closeEditModal without
+         touching the composite-key patch1 fix or admin_update_device contract
+
+  --- Not in v0.4.0 (coming later) ---
+  C.3c: B9 Last seen column split (sensor vs updated_at)
+  C.3d: B13 Map Preview (BEFF card mockup before save)
   C.4:  PWA wrapper (manifest, service worker)
   Round D: User management UI
 
@@ -1165,6 +1183,171 @@
   #table-devices tbody tr:hover { background: var(--bg-surface-hover); }
   /* Prevent hover from causing layout shift when over interactive elements */
   #table-devices tbody tr:has(button:hover) { background: transparent; }
+
+  /* ==============================================================
+     [10d] UPLOAD / DROPZONE  (Round C.3b — ported from tactical-lite [28])
+     ============================================================== */
+  /* .t-upload เป็น <label> ที่ครอบ <input type="file"> + icon + title + hint
+     Click-to-upload ทำงานผ่าน <label for="..."> อัตโนมัติ
+     Drag-drop เพิ่มด้วย JS (DataTransfer API — ดู attachPhotoUploadHandlers) */
+  .t-upload {
+    display: block;               /* [B-1] label เป็น inline โดย default — ต้อง block เพื่อ rect border */
+    width: 100%;                  /* [B-1] ให้ fill parent ภายใน flex */
+    border: 2px dashed var(--border-strong);
+    border-radius: var(--r-md);
+    padding: var(--sp-6);
+    text-align: center;
+    cursor: pointer;
+    transition: all var(--dur-fast) var(--ease-std);
+    background: var(--bg-surface);
+    position: relative;
+  }
+  .t-upload:hover,
+  .t-upload.is-dragover {
+    border-color: var(--color-primary);
+    background: var(--color-primary-dim);
+  }
+
+  /* [F-2b v2] sr-only pattern (1x1px clip) — ซ่อน native file input ทั้งหมด
+     ไม่มี tooltip/outline/"No file chosen" text leak ใน Chromium/Arc */
+  .t-upload input[type="file"] {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .t-upload-icon {
+    font-size: 32px;
+    line-height: 1;                /* [F-2] ป้องกัน glyph ถูก clip */
+    display: inline-block;         /* [F-2] ให้ icon มี box ปกติ */
+    color: var(--text-low);
+    margin-bottom: var(--sp-2);
+  }
+  .t-upload:hover .t-upload-icon,
+  .t-upload.is-dragover .t-upload-icon { color: var(--color-primary); }
+
+  .t-upload-title {
+    font-size: var(--text-sm);
+    color: var(--text-high);
+    font-weight: 500;
+    margin-bottom: 2px;
+  }
+  .t-upload-hint {
+    font-size: var(--text-xs);
+    color: var(--text-low);
+    overflow-wrap: break-word;
+  }
+
+  /* C.3b NEW — uploading state: spinner overlay + disable interactions */
+  .t-upload.is-uploading {
+    pointer-events: none;
+    border-color: var(--color-primary);
+    background: var(--color-primary-dim);
+  }
+  .t-upload.is-uploading .t-upload-icon { visibility: hidden; }
+  .t-upload.is-uploading::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 28px;
+    height: 28px;
+    margin: -14px 0 0 -14px;
+    border: 2.5px solid var(--color-primary-border);
+    border-top-color: var(--color-primary);
+    border-radius: 50%;
+    animation: t-upload-spin 0.8s linear infinite;
+  }
+  @keyframes t-upload-spin {
+    to { transform: rotate(360deg); }
+  }
+
+  /* C.3b NEW — disabled state (during modal save, etc.) */
+  .t-upload.is-disabled {
+    pointer-events: none;
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+
+  /* Uploaded file preview (ต้องอยู่ *นอก* label เพื่อกัน L-shape border — B-1 fix) */
+  .t-upload-preview {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    padding: var(--sp-3);
+    background: var(--bg-surface);
+    border: 1px solid var(--border-default);
+    border-radius: var(--r-md);
+    margin-top: var(--sp-3);
+  }
+  .t-upload-preview-thumb {
+    width: 48px;
+    height: 48px;
+    border-radius: var(--r-sm);
+    object-fit: cover;
+    background: var(--bg-input);
+    flex-shrink: 0;
+    display: block;
+  }
+  .t-upload-preview-info { flex: 1; min-width: 0; }
+  .t-upload-preview-name {
+    font-size: var(--text-sm);
+    color: var(--text-high);
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .t-upload-preview-size {
+    font-family: var(--font-mono);
+    font-size: var(--text-2xs);
+    color: var(--text-low);
+  }
+  .t-upload-preview-remove {
+    background: none;
+    border: 1px solid var(--border-default);
+    color: var(--text-low);
+    padding: 6px;
+    border-radius: var(--r-sm);
+    cursor: pointer;
+    transition: all var(--dur-fast);
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .t-upload-preview-remove:hover {
+    color: var(--color-danger);
+    border-color: var(--color-danger-border);
+    background: var(--color-danger-dim);
+  }
+  .t-upload-preview-remove:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    background: transparent;
+  }
+  .t-upload-preview-remove i { font-size: 14px; }
+
+  /* C.3b NEW — inline error under upload (separate from .t-field-error to stack with preview) */
+  .t-upload-error {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    margin-top: var(--sp-2);
+    padding: var(--sp-2) var(--sp-3);
+    background: var(--color-danger-dim);
+    border: 1px solid var(--color-danger-border);
+    border-radius: var(--r-sm);
+    font-size: var(--text-xs);
+    color: var(--color-danger);
+  }
+  .t-upload-error i { font-size: 14px; flex-shrink: 0; }
 
   /* ==============================================================
      [11] ALERTS
@@ -2373,10 +2556,38 @@
               </div>
 
               <div class="t-field">
-                <label class="t-label" for="edit-photo-url" data-i18n="edit.field.photoUrl">Photo URL</label>
+                <label class="t-label" data-i18n="edit.field.photo">Photo</label>
+                <!-- Dropzone (primary input for new uploads) -->
+                <label class="t-upload" for="edit-photo-file" id="edit-photo-dropzone">
+                  <input type="file" id="edit-photo-file" accept="image/jpeg,image/png,image/webp" autocomplete="off">
+                  <i class="ti ti-cloud-upload t-upload-icon"></i>
+                  <div class="t-upload-title" data-i18n="edit.field.photoDropzoneTitle">Click or drop an image</div>
+                  <div class="t-upload-hint" data-i18n="edit.field.photoDropzoneHint">JPG, PNG, WebP &mdash; max 5 MB (auto-resized)</div>
+                </label>
+                <!-- Preview card (shown when a file is selected OR existing photo_url is loaded) -->
+                <div class="t-upload-preview" id="edit-photo-preview" hidden>
+                  <img class="t-upload-preview-thumb" id="edit-photo-preview-thumb" alt="">
+                  <div class="t-upload-preview-info">
+                    <div class="t-upload-preview-name" id="edit-photo-preview-name"></div>
+                    <div class="t-upload-preview-size" id="edit-photo-preview-size"></div>
+                  </div>
+                  <button type="button" class="t-upload-preview-remove" id="edit-photo-preview-remove"
+                    data-i18n-title="edit.photo.remove" title="Remove photo" aria-label="Remove photo">
+                    <i class="ti ti-x"></i>
+                  </button>
+                </div>
+                <!-- Inline upload error (size / MIME / upload failed) -->
+                <div class="t-upload-error" id="edit-photo-upload-error" hidden>
+                  <i class="ti ti-alert-triangle"></i>
+                  <span id="edit-photo-upload-error-msg"></span>
+                </div>
+              </div>
+
+              <div class="t-field">
+                <label class="t-label" for="edit-photo-url" data-i18n="edit.field.photoUrl">Or paste URL directly</label>
                 <input type="url" class="t-input" id="edit-photo-url" maxlength="500" autocomplete="off"
                   placeholder="https://...">
-                <div class="t-field-hint" data-i18n="edit.field.photoUrlHint">Direct image URL. Upload widget arrives in C.3b.</div>
+                <div class="t-field-hint" data-i18n="edit.field.photoUrlHint">Direct image URL &mdash; for reusing an already-hosted photo.</div>
                 <div class="t-field-error" id="edit-photo-url-error" hidden></div>
               </div>
 
@@ -2536,7 +2747,12 @@
     editFormTouched:  false,  // true when user modified any field — triggers confirm-close
     editSaving:       false,  // true while admin_update_device RPC is in-flight
     editLastFocus:    null,   // element that opened modal (restore focus on close)
-    editTrapHandler:  null    // Tab-key trap handler (attached when modal opens)
+    editTrapHandler:  null,   // Tab-key trap handler (attached when modal opens)
+    // Round C.3b: photo upload state
+    editPhotoOldUrl:     null,   // ค่า photo_url ตอนเปิด modal (เอาไว้ delete-old หลัง save success)
+    editPhotoPendingUrl: null,   // URL ที่ upload ไปแล้วแต่ยังไม่ save — ถ้า discard/replace ต้อง cleanup
+    editPhotoObjectUrl:  null,   // Blob URL ที่ createObjectURL() ไว้ — ต้อง revoke ตอน modal close
+    editPhotoUploading:  false   // true ระหว่าง resize + upload in-flight (บล็อก save + upload ซ้ำ)
   };
 
   // =================================================================
@@ -2689,8 +2905,11 @@
       'edit.field.visibility': 'Visibility',
       'edit.field.isPublic': 'Public (visible on BEFF Map)',
       'edit.field.locationName': 'Location name',
-      'edit.field.photoUrl': 'Photo URL',
-      'edit.field.photoUrlHint': 'Direct image URL. Upload widget arrives in C.3b.',
+      'edit.field.photo': 'Photo',
+      'edit.field.photoUrl': 'Or paste URL directly',
+      'edit.field.photoUrlHint': 'Direct image URL — for reusing an already-hosted photo.',
+      'edit.field.photoDropzoneTitle': 'Click or drop an image',
+      'edit.field.photoDropzoneHint': 'JPG, PNG, WebP — max 5 MB (auto-resized)',
       'edit.field.category': 'Category',
       'edit.field.address': 'Address',
       'edit.field.email': 'Public email',
@@ -2705,6 +2924,21 @@
       'edit.noChangesMessage': 'You have not modified any fields.',
       'edit.saveSuccessTitle': 'Device updated',
       'edit.saveSuccessMessage': 'Changes saved successfully.',
+
+      // ==== Round C.3b: Photo upload pipeline ====
+      'edit.photo.remove': 'Remove photo',
+      'edit.photo.existing': 'Existing photo',
+      'edit.photo.uploading': 'Uploading...',
+      'edit.photo.resizing': 'Preparing image...',
+      'edit.photo.uploadSuccessTitle': 'Photo uploaded',
+      'edit.photo.uploadSuccessMessage': 'Press Save to apply changes.',
+      'edit.photo.uploadErrorTitle': 'Upload failed',
+      'upload.error.tooLarge': 'File is too large (max 5 MB).',
+      'upload.error.wrongType': 'Unsupported file type. Use JPG, PNG, or WebP.',
+      'upload.error.readFailed': 'Could not read the image file.',
+      'upload.error.resizeFailed': 'Could not process the image.',
+      'upload.error.uploadFailed': 'Upload failed. Please try again.',
+      'upload.error.notLoggedIn': 'Session expired. Please log in again.',
 
       // ==== Round C.3a: Form validation ====
       'validation.latitudeRange': 'Latitude must be between -90 and 90.',
@@ -2867,8 +3101,11 @@
       'edit.field.visibility': 'การมองเห็น',
       'edit.field.isPublic': 'สาธารณะ (แสดงบน BEFF Map)',
       'edit.field.locationName': 'ชื่อสถานที่',
-      'edit.field.photoUrl': 'Photo URL',
-      'edit.field.photoUrlHint': 'URL รูปภาพโดยตรง — ฟีเจอร์อัปโหลดจะมาใน C.3b',
+      'edit.field.photo': 'รูปภาพ',
+      'edit.field.photoUrl': 'หรือวาง URL โดยตรง',
+      'edit.field.photoUrlHint': 'URL รูปภาพโดยตรง — สำหรับใช้รูปที่โฮสต์อยู่แล้ว',
+      'edit.field.photoDropzoneTitle': 'คลิกหรือวางรูปภาพ',
+      'edit.field.photoDropzoneHint': 'JPG, PNG, WebP — ไม่เกิน 5 MB (ย่อขนาดอัตโนมัติ)',
       'edit.field.category': 'หมวดหมู่',
       'edit.field.address': 'ที่อยู่',
       'edit.field.email': 'อีเมลสาธารณะ',
@@ -2883,6 +3120,21 @@
       'edit.noChangesMessage': 'คุณยังไม่ได้แก้ไขฟิลด์ใดๆ',
       'edit.saveSuccessTitle': 'อัปเดตอุปกรณ์แล้ว',
       'edit.saveSuccessMessage': 'บันทึกการเปลี่ยนแปลงเรียบร้อยแล้ว',
+
+      // ==== Round C.3b: Photo upload pipeline ====
+      'edit.photo.remove': 'ลบรูปภาพ',
+      'edit.photo.existing': 'รูปปัจจุบัน',
+      'edit.photo.uploading': 'กำลังอัปโหลด...',
+      'edit.photo.resizing': 'กำลังเตรียมรูปภาพ...',
+      'edit.photo.uploadSuccessTitle': 'อัปโหลดรูปสำเร็จ',
+      'edit.photo.uploadSuccessMessage': 'กด "บันทึก" เพื่อใช้การเปลี่ยนแปลง',
+      'edit.photo.uploadErrorTitle': 'อัปโหลดไม่สำเร็จ',
+      'upload.error.tooLarge': 'ไฟล์ใหญ่เกินไป (ไม่เกิน 5 MB)',
+      'upload.error.wrongType': 'ชนิดไฟล์ไม่รองรับ — ใช้ JPG, PNG หรือ WebP',
+      'upload.error.readFailed': 'ไม่สามารถอ่านไฟล์ภาพได้',
+      'upload.error.resizeFailed': 'ไม่สามารถประมวลผลรูปภาพได้',
+      'upload.error.uploadFailed': 'อัปโหลดไม่สำเร็จ กรุณาลองใหม่',
+      'upload.error.notLoggedIn': 'หมดอายุการใช้งาน กรุณาเข้าสู่ระบบใหม่',
 
       // ==== Round C.3a: Form validation ====
       'validation.latitudeRange': 'ละติจูดต้องอยู่ระหว่าง -90 ถึง 90',
@@ -4103,6 +4355,19 @@
     const alertEl = document.getElementById('edit-alert');
     if (alertEl) alertEl.hidden = true;
 
+    // ==== Round C.3b: Photo preview setup ====
+    // เก็บ URL เดิม (สำหรับ delete-old หลัง save success)
+    const existingPhotoUrl = raw.photo_url || '';
+    state.editPhotoOldUrl     = existingPhotoUrl || null;
+    state.editPhotoPendingUrl = null;   // เพิ่ง bind → ยังไม่มี pending upload
+    state.editPhotoUploading  = false;
+    setUploadUIState('idle', null);      // clear any stale error + enable controls
+    if (existingPhotoUrl) {
+      renderPhotoPreviewFromUrl(existingPhotoUrl);
+    } else {
+      clearPhotoPreview(false);          // cleanupPending=false (ไม่มี pending)
+    }
+
     state.editFormTouched = false;
     updateDirtyIndicator();
   }
@@ -4289,6 +4554,27 @@
       openConfirmCloseModal();
       return;
     }
+
+    // ==== Round C.3b: Photo cleanup on close ====
+    // ถ้ามี pending URL ที่ upload ไว้แต่ยังไม่ save → ลบออกจาก Storage (orphan cleanup)
+    // หมายเหตุ: onSaveEditForm() success จะเคลียร์ editPhotoPendingUrl = null แล้ว
+    //          → ที่นี่จะลบเฉพาะเคส discard/cancel
+    // Reset file input value เพื่อให้เลือกไฟล์เดิมได้ครั้งถัดไป
+    const fileInput = document.getElementById('edit-photo-file');
+    if (fileInput) fileInput.value = '';
+    if (state.editPhotoPendingUrl) {
+      deleteOldPhoto(state.editPhotoPendingUrl);
+      state.editPhotoPendingUrl = null;
+    }
+    if (state.editPhotoObjectUrl) {
+      try { URL.revokeObjectURL(state.editPhotoObjectUrl); } catch (_) {}
+      state.editPhotoObjectUrl = null;
+    }
+    state.editPhotoOldUrl    = null;
+    state.editPhotoUploading = false;
+    clearPhotoPreview(false);           // cleanupPending=false (ลบไปแล้วด้านบน)
+    setUploadUIState('idle', null);
+
     const modal = document.getElementById('modal-edit-device');
     modal.classList.remove('is-open');
     setTimeout(function () {
@@ -4364,6 +4650,19 @@
       if (data && data.success === false) {
         throw new Error(data.message || 'admin_update_device returned failure');
       }
+
+      // ==== Round C.3b: Delete old photo (best-effort, non-blocking) ====
+      // เงื่อนไข: (1) URL เปลี่ยนจริง (2) old URL เป็นของ bucket เรา
+      // หมายเหตุ: pending URL ตอนนี้กลายเป็น "saved" แล้ว → เคลียร์ editPhotoPendingUrl
+      //          ให้ closeEditModal() ไม่ไปลบ URL ที่พึ่ง save เป็นของจริง
+      const newPhotoUrl = (document.getElementById('edit-photo-url').value || '').trim();
+      const oldPhotoUrl = state.editPhotoOldUrl || '';
+      if (oldPhotoUrl && oldPhotoUrl !== newPhotoUrl) {
+        // Fire-and-forget — ไม่ await เพราะไม่อยาก block UI ถ้า delete ช้า/fail
+        deleteOldPhoto(oldPhotoUrl);
+      }
+      state.editPhotoPendingUrl = null;   // saved แล้ว ไม่ใช่ orphan อีกต่อไป
+      state.editPhotoOldUrl     = null;   // กัน closeEditModal() ลบซ้ำ
 
       // Invalidate cache + refresh device list
       state.devices = null;
@@ -4491,7 +4790,11 @@
         // (simpler: just revalidate this field)
         const v = el.value.trim();
         clearFieldErrorById(id);
-        if (v === '') return;
+        if (v === '') {
+          // C.3b: ถ้า admin ล้าง URL → ซ่อน preview (แต่ไม่ลบ pending orphan เพราะอาจจะ paste ใหม่)
+          if (id === 'edit-photo-url') clearPhotoPreview(false);
+          return;
+        }
         if (id === 'edit-latitude') {
           const n = Number(v);
           if (!isFinite(n) || n < -90 || n > 90) setFieldError(id, 'validation.latitudeRange');
@@ -4501,14 +4804,494 @@
         } else if (id === 'edit-email') {
           if (!isValidEmail(v)) setFieldError(id, 'validation.emailFormat');
         } else if (id === 'edit-photo-url' || id === 'edit-website') {
-          if (!isValidUrl(v)) setFieldError(id, 'validation.urlFormat');
+          if (!isValidUrl(v)) {
+            setFieldError(id, 'validation.urlFormat');
+          } else if (id === 'edit-photo-url') {
+            // C.3b: URL valid → sync preview (สำหรับเคสที่ admin paste URL เอง)
+            // ไม่แตะ editPhotoPendingUrl เพราะ URL ที่ paste ไม่ใช่ของที่เรา upload
+            renderPhotoPreviewFromUrl(v);
+            setUploadUIState('idle', null);
+          }
         }
       });
     });
+
+    // ==== Round C.3b: Wire up photo upload handlers (file input + × + drag-drop) ====
+    attachPhotoUploadHandlers();
   }
 
   // =================================================================
-  // [9] VIEW TRANSITIONS
+  // [8f] PHOTO UPLOAD PIPELINE (Round C.3b)
+  //  Pipeline: select/drop file → validate → resize on Canvas → upload to Storage
+  //            → set URL into #edit-photo-url input → show preview
+  //  Old-photo delete: fires AFTER admin_update_device succeeds (non-blocking)
+  //  Orphan cleanup: if admin uploads twice before save OR discards modal with a
+  //                  pending upload, the un-saved URL is deleted (best-effort)
+  //
+  //  Key functions:
+  //   - onPhotoFileSelected(file)        main entrypoint (click + drop share this)
+  //   - resizeImageFile(file)            Canvas resize → Blob (WebP preferred, JPEG fallback)
+  //   - uploadPhotoToStorage(blob, ...)  sb.storage.from('device-photos').upload()
+  //   - deleteOldPhoto(url)              best-effort Storage remove (URL → path parse)
+  //   - renderPhotoPreviewFromBlob(...)  preview card from just-resized Blob (Object URL)
+  //   - renderPhotoPreviewFromUrl(url)   preview card from existing/pasted URL
+  //   - clearPhotoPreview(cleanupPending) hide card; optionally delete pending orphan
+  //   - attachPhotoUploadHandlers()      wire up file input + × + drag-drop (once on boot)
+  //
+  //  DO NOT touch (preserve from C.3a + patch1):
+  //   - admin_update_device RPC contract
+  //   - EDIT_FIELD_MAP (photo_url stays source-of-truth for save payload)
+  //   - openEditModalForDevice() composite-key lookup (patch1 Q2.3 fix)
+  // =================================================================
+
+  // --- Constants ---
+  const PHOTO_MAX_BYTES   = 5 * 1024 * 1024;   // 5 MB — match bucket file_size_limit
+  const PHOTO_MAX_WIDTH   = 1600;              // client-side resize target (longest-side fit)
+  const PHOTO_MAX_HEIGHT  = 1200;
+  const PHOTO_WEBP_QUALITY = 0.85;
+  const PHOTO_JPEG_QUALITY = 0.88;             // slightly higher for JPEG fallback (no alpha)
+  const PHOTO_ACCEPTED_MIMES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+  const PHOTO_BUCKET = 'device-photos';
+
+  /**
+   * formatFileSize(bytes) — human-readable size ("247 KB", "2.1 MB", "0 B")
+   */
+  function formatFileSize(bytes) {
+    if (bytes == null || !isFinite(bytes) || bytes < 0) return '—';
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(0) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  }
+
+  /**
+   * validateUploadFile(file) → { ok: bool, errorKey: string|null }
+   * Pre-flight client-side check (size + MIME whitelist).
+   */
+  function validateUploadFile(file) {
+    if (!file) return { ok: false, errorKey: 'upload.error.readFailed' };
+    if (file.size > PHOTO_MAX_BYTES) return { ok: false, errorKey: 'upload.error.tooLarge' };
+    const type = (file.type || '').toLowerCase();
+    // Note: บาง browser ส่ง image/jpg, บางอันส่ง image/jpeg — รับทั้งคู่
+    if (PHOTO_ACCEPTED_MIMES.indexOf(type) === -1) {
+      return { ok: false, errorKey: 'upload.error.wrongType' };
+    }
+    return { ok: true, errorKey: null };
+  }
+
+  /**
+   * canEncodeWebP() — feature detect: browser รองรับ canvas.toDataURL('image/webp')
+   * Firefox pre-101 + Safari pre-14 คืน data:image/png แทน ถ้าไม่ support
+   */
+  let _webpSupportCache = null;
+  function canEncodeWebP() {
+    if (_webpSupportCache !== null) return _webpSupportCache;
+    try {
+      const c = document.createElement('canvas');
+      c.width = 1; c.height = 1;
+      const dataUrl = c.toDataURL('image/webp');
+      _webpSupportCache = dataUrl.indexOf('data:image/webp') === 0;
+    } catch (_) {
+      _webpSupportCache = false;
+    }
+    return _webpSupportCache;
+  }
+
+  /**
+   * resizeImageFile(file) → Promise<{ blob, ext, mimeType, width, height }>
+   * - โหลดรูปเข้า <img> → วาดลง <canvas> ตามขนาด target (preserve aspect) → toBlob
+   * - WebP ถ้า browser support, fallback เป็น JPEG
+   * - ไม่ upscale — รูปเล็กกว่า target จะคงขนาดเดิม (ยังคงบีบอัดใหม่ลด KB)
+   */
+  function resizeImageFile(file) {
+    return new Promise(function (resolve, reject) {
+      const reader = new FileReader();
+      reader.onerror = function () { reject(new Error('readFailed')); };
+      reader.onload = function () {
+        const dataUrl = reader.result;
+        const img = new Image();
+        img.onerror = function () { reject(new Error('readFailed')); };
+        img.onload = function () {
+          try {
+            // คำนวณขนาด target — preserve aspect ratio, ไม่ upscale
+            let w = img.naturalWidth || img.width;
+            let h = img.naturalHeight || img.height;
+            if (w <= 0 || h <= 0) { reject(new Error('resizeFailed')); return; }
+            const scale = Math.min(1, PHOTO_MAX_WIDTH / w, PHOTO_MAX_HEIGHT / h);
+            const targetW = Math.round(w * scale);
+            const targetH = Math.round(h * scale);
+
+            const canvas = document.createElement('canvas');
+            canvas.width = targetW;
+            canvas.height = targetH;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) { reject(new Error('resizeFailed')); return; }
+            // จัดการ PNG transparency — ถ้าจะ encode เป็น JPEG (ไม่มี alpha)
+            // เทสีพื้นหลังขาวก่อน drawImage เพื่อกันพื้นดำ
+            const useWebP = canEncodeWebP();
+            if (!useWebP) {
+              ctx.fillStyle = '#ffffff';
+              ctx.fillRect(0, 0, targetW, targetH);
+            }
+            ctx.drawImage(img, 0, 0, targetW, targetH);
+
+            const targetMime = useWebP ? 'image/webp' : 'image/jpeg';
+            const targetExt  = useWebP ? 'webp' : 'jpg';
+            const targetQuality = useWebP ? PHOTO_WEBP_QUALITY : PHOTO_JPEG_QUALITY;
+
+            canvas.toBlob(function (blob) {
+              if (!blob) { reject(new Error('resizeFailed')); return; }
+              resolve({
+                blob: blob,
+                ext: targetExt,
+                mimeType: targetMime,
+                width: targetW,
+                height: targetH
+              });
+            }, targetMime, targetQuality);
+          } catch (e) {
+            console.error('[photo] resizeImageFile error:', e);
+            reject(new Error('resizeFailed'));
+          }
+        };
+        img.src = dataUrl;
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  /**
+   * uploadPhotoToStorage(blob, deviceId, ext, mimeType) → Promise<string>
+   * path = {admin_user_id}/{device_id}/{timestamp}.{ext}
+   * ใช้ admin's UID เป็น folder root (ไม่ใช่ device owner's UID) เพื่อ audit
+   * และเพราะ RLS admin-override policies อนุญาตให้ admin เขียนลง folder ตัวเองได้เสมอ
+   */
+  async function uploadPhotoToStorage(blob, deviceId, ext, mimeType) {
+    if (!state.currentUser || !state.currentUser.id) {
+      throw new Error('notLoggedIn');
+    }
+    const adminUid = state.currentUser.id;
+    const path = adminUid + '/' + deviceId + '/' + Date.now() + '.' + ext;
+
+    const { data: upData, error: upErr } = await sb.storage
+      .from(PHOTO_BUCKET)
+      .upload(path, blob, {
+        cacheControl: '3600',
+        upsert: false,
+        contentType: mimeType
+      });
+    if (upErr) {
+      console.error('[photo] upload failed:', upErr);
+      throw upErr;
+    }
+
+    const { data: urlData } = sb.storage.from(PHOTO_BUCKET).getPublicUrl(path);
+    if (!urlData || !urlData.publicUrl) {
+      throw new Error('uploadFailed');
+    }
+    return urlData.publicUrl;
+  }
+
+  /**
+   * extractStoragePathFromUrl(url) → path | null
+   * Parse our bucket URL → path inside bucket
+   *   https://brgz.../storage/v1/object/public/device-photos/<admin>/<dev>/<ts>.webp
+   *   → <admin>/<dev>/<ts>.webp
+   * คืน null ถ้าไม่ใช่ URL จาก bucket ของเรา (external URL ที่ admin paste เอง)
+   */
+  function extractStoragePathFromUrl(url) {
+    if (typeof url !== 'string' || !url) return null;
+    const marker = '/' + PHOTO_BUCKET + '/';
+    const idx = url.indexOf(marker);
+    if (idx < 0) return null;
+    const path = url.substring(idx + marker.length);
+    // แยก query string ออก (กันเผื่อ URL มี ?t=cachebuster)
+    const qIdx = path.indexOf('?');
+    return qIdx >= 0 ? path.substring(0, qIdx) : path;
+  }
+
+  /**
+   * deleteOldPhoto(url) — best-effort async delete (swallow errors)
+   * เรียกได้กับทั้ง old URL และ pending URL (orphan cleanup)
+   */
+  function deleteOldPhoto(url) {
+    const path = extractStoragePathFromUrl(url);
+    if (!path) return;   // external URL — ไม่ใช่ bucket เราเลย ไม่ต้องลบ
+    sb.storage.from(PHOTO_BUCKET).remove([path]).then(function (result) {
+      if (result && result.error) {
+        console.warn('[photo] delete old photo failed (non-blocking):', result.error, path);
+      } else {
+        console.log('[photo] deleted old photo:', path);
+      }
+    }).catch(function (e) {
+      console.warn('[photo] delete old photo threw (non-blocking):', e, path);
+    });
+  }
+
+  /**
+   * guessFilenameFromUrl(url) → string — "image.webp" หรือ fallback
+   */
+  function guessFilenameFromUrl(url) {
+    if (typeof url !== 'string' || !url) return 'photo';
+    try {
+      const u = new URL(url);
+      const parts = u.pathname.split('/').filter(Boolean);
+      if (parts.length) return decodeURIComponent(parts[parts.length - 1]);
+    } catch (_) { /* ignore */ }
+    return 'photo';
+  }
+
+  /**
+   * renderPhotoPreviewFromBlob(blob, filename) — สำหรับไฟล์ที่เพิ่ง resize เสร็จ
+   * สร้าง Object URL ใหม่ + revoke ของเดิม (ถ้ามี) กัน memory leak
+   */
+  function renderPhotoPreviewFromBlob(blob, filename) {
+    // Revoke เก่าก่อน
+    if (state.editPhotoObjectUrl) {
+      try { URL.revokeObjectURL(state.editPhotoObjectUrl); } catch (_) {}
+      state.editPhotoObjectUrl = null;
+    }
+    const objUrl = URL.createObjectURL(blob);
+    state.editPhotoObjectUrl = objUrl;
+
+    const thumb = document.getElementById('edit-photo-preview-thumb');
+    const nameEl = document.getElementById('edit-photo-preview-name');
+    const sizeEl = document.getElementById('edit-photo-preview-size');
+    const preview = document.getElementById('edit-photo-preview');
+    if (thumb) thumb.src = objUrl;
+    if (nameEl) nameEl.textContent = filename || 'photo';
+    if (sizeEl) {
+      sizeEl.textContent = formatFileSize(blob.size) + ' · ' + (blob.type || 'image');
+    }
+    if (preview) preview.hidden = false;
+  }
+
+  /**
+   * renderPhotoPreviewFromUrl(url) — สำหรับ URL ที่มีอยู่แล้ว (existing photo_url หรือ paste)
+   */
+  function renderPhotoPreviewFromUrl(url) {
+    // Revoke Object URL เก่า (ถ้ามี) — ตอนนี้โชว์จาก URL จริง ไม่ต้องใช้ blob แล้ว
+    if (state.editPhotoObjectUrl) {
+      try { URL.revokeObjectURL(state.editPhotoObjectUrl); } catch (_) {}
+      state.editPhotoObjectUrl = null;
+    }
+    if (typeof url !== 'string' || !url.trim()) return;
+
+    const thumb = document.getElementById('edit-photo-preview-thumb');
+    const nameEl = document.getElementById('edit-photo-preview-name');
+    const sizeEl = document.getElementById('edit-photo-preview-size');
+    const preview = document.getElementById('edit-photo-preview');
+
+    if (thumb) thumb.src = url;
+    if (nameEl) nameEl.textContent = guessFilenameFromUrl(url);
+    if (sizeEl) sizeEl.textContent = t('edit.photo.existing');
+    if (preview) preview.hidden = false;
+  }
+
+  /**
+   * clearPhotoPreview(cleanupPending)
+   *   - ซ่อน preview card + ล้าง src
+   *   - revoke Object URL ถ้ามี
+   *   - ถ้า cleanupPending=true → ลบ editPhotoPendingUrl (orphan cleanup)
+   */
+  function clearPhotoPreview(cleanupPending) {
+    const thumb = document.getElementById('edit-photo-preview-thumb');
+    const nameEl = document.getElementById('edit-photo-preview-name');
+    const sizeEl = document.getElementById('edit-photo-preview-size');
+    const preview = document.getElementById('edit-photo-preview');
+    if (preview) preview.hidden = true;
+    if (thumb) thumb.removeAttribute('src');
+    if (nameEl) nameEl.textContent = '';
+    if (sizeEl) sizeEl.textContent = '';
+
+    if (state.editPhotoObjectUrl) {
+      try { URL.revokeObjectURL(state.editPhotoObjectUrl); } catch (_) {}
+      state.editPhotoObjectUrl = null;
+    }
+    if (cleanupPending && state.editPhotoPendingUrl) {
+      deleteOldPhoto(state.editPhotoPendingUrl);
+      state.editPhotoPendingUrl = null;
+    }
+  }
+
+  /**
+   * setUploadUIState(state, errorKey)
+   *   state: 'idle' | 'uploading' | 'error'
+   *   errorKey: i18n key for 'error' state
+   */
+  function setUploadUIState(uiState, errorKey) {
+    const dz = document.getElementById('edit-photo-dropzone');
+    const fileInput = document.getElementById('edit-photo-file');
+    const errEl = document.getElementById('edit-photo-upload-error');
+    const errMsg = document.getElementById('edit-photo-upload-error-msg');
+    const removeBtn = document.getElementById('edit-photo-preview-remove');
+
+    if (dz) {
+      dz.classList.remove('is-uploading', 'is-dragover');
+      if (uiState === 'uploading') dz.classList.add('is-uploading');
+    }
+    if (fileInput) fileInput.disabled = (uiState === 'uploading');
+    if (removeBtn) removeBtn.disabled = (uiState === 'uploading');
+
+    if (uiState === 'error' && errorKey) {
+      if (errMsg) errMsg.textContent = t(errorKey);
+      if (errEl) errEl.hidden = false;
+    } else {
+      if (errEl) errEl.hidden = true;
+      if (errMsg) errMsg.textContent = '';
+    }
+  }
+
+  /**
+   * onPhotoFileSelected(file) — main flow (shared by click + drag-drop)
+   */
+  async function onPhotoFileSelected(file) {
+    if (state.editPhotoUploading) return;   // กันคลิกซ้ำระหว่าง upload
+    if (!state.editingDevice) return;
+
+    // 1. Pre-flight validation
+    const check = validateUploadFile(file);
+    if (!check.ok) {
+      setUploadUIState('error', check.errorKey);
+      showToast('danger', 'edit.photo.uploadErrorTitle', check.errorKey);
+      return;
+    }
+
+    // 2. ถ้ามี pending เก่าที่ upload ไปแล้ว → ลบทิ้งก่อน (orphan cleanup)
+    const oldPending = state.editPhotoPendingUrl;
+    state.editPhotoPendingUrl = null;
+
+    setUploadUIState('uploading', null);
+    state.editPhotoUploading = true;
+
+    let resized = null;
+    try {
+      // 3. Client-side resize
+      resized = await resizeImageFile(file);
+
+      // 4. Upload to Storage
+      const deviceId = state.editingDevice.deviceId;
+      const publicUrl = await uploadPhotoToStorage(
+        resized.blob, deviceId, resized.ext, resized.mimeType
+      );
+
+      // 5. Success — อัปเดต state + UI
+      state.editPhotoPendingUrl = publicUrl;
+
+      // เขียน URL กลับเข้า text input (source-of-truth สำหรับ buildUpdatePayload)
+      const urlInput = document.getElementById('edit-photo-url');
+      if (urlInput) {
+        urlInput.value = publicUrl;
+        clearFieldErrorById('edit-photo-url');
+      }
+
+      // แสดง preview จาก Blob (เร็วกว่ารอ CDN) + revoke object URL ตอนปิด modal
+      renderPhotoPreviewFromBlob(resized.blob, file.name);
+
+      // Mark form dirty — trigger confirm-close ถ้ายกเลิกโดยไม่ save
+      if (!state.editFormTouched) {
+        state.editFormTouched = true;
+        updateDirtyIndicator();
+      }
+
+      setUploadUIState('idle', null);
+      showToast('safe', 'edit.photo.uploadSuccessTitle', 'edit.photo.uploadSuccessMessage');
+
+      // 6. Orphan cleanup — ลบ pending เก่าที่ตอนนี้ถูกแทนที่แล้ว
+      if (oldPending) deleteOldPhoto(oldPending);
+
+    } catch (err) {
+      console.error('[photo] upload pipeline failed:', err);
+      // ใช้ err.message เป็น key ถ้ารู้, ไม่งั้น generic
+      let errKey = 'upload.error.uploadFailed';
+      const msg = (err && err.message) ? String(err.message) : '';
+      if (msg === 'readFailed')    errKey = 'upload.error.readFailed';
+      else if (msg === 'resizeFailed') errKey = 'upload.error.resizeFailed';
+      else if (msg === 'notLoggedIn')  errKey = 'upload.error.notLoggedIn';
+
+      setUploadUIState('error', errKey);
+      showToast('danger', 'edit.photo.uploadErrorTitle', errKey);
+
+      // Restore pending เก่า (ไม่ได้แทนอะไรเพราะ upload ใหม่พัง)
+      state.editPhotoPendingUrl = oldPending;
+    } finally {
+      state.editPhotoUploading = false;
+      // Reset file input เพื่อให้เลือกไฟล์เดิมซ้ำได้ (change event จะ fire เฉพาะเมื่อค่าเปลี่ยน)
+      const fileInput = document.getElementById('edit-photo-file');
+      if (fileInput) fileInput.value = '';
+    }
+  }
+
+  /**
+   * attachPhotoUploadHandlers() — wire up file input change + × button + drag-drop
+   * เรียก 1 ครั้งตอน attachEventListeners() (boot sequence)
+   */
+  function attachPhotoUploadHandlers() {
+    const dz = document.getElementById('edit-photo-dropzone');
+    const fileInput = document.getElementById('edit-photo-file');
+    const removeBtn = document.getElementById('edit-photo-preview-remove');
+
+    // Click-to-upload ทำงานผ่าน <label for="..."> อัตโนมัติ — แค่ wire change event
+    if (fileInput) {
+      fileInput.addEventListener('change', function (e) {
+        const file = e.target.files && e.target.files[0];
+        if (file) onPhotoFileSelected(file);
+      });
+    }
+
+    // × ลบรูป (เฉพาะ UI-level — จริงๆ แล้ว RPC จะไม่ clear field เพราะ COALESCE — ดู B12)
+    if (removeBtn) {
+      removeBtn.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();   // กันคลิกทะลุไปที่ dropzone
+        if (state.editPhotoUploading) return;
+        // ล้าง URL input + preview + ลบ pending orphan (ถ้ามี)
+        const urlInput = document.getElementById('edit-photo-url');
+        if (urlInput) {
+          urlInput.value = '';
+          clearFieldErrorById('edit-photo-url');
+        }
+        clearPhotoPreview(true);   // cleanupPending=true
+        setUploadUIState('idle', null);
+        // Mark dirty (URL changed from whatever to empty)
+        if (!state.editFormTouched) {
+          state.editFormTouched = true;
+          updateDirtyIndicator();
+        }
+      });
+    }
+
+    // Drag-drop (DataTransfer API — DS v1.3.0 ยังไม่มี)
+    if (dz) {
+      // กัน browser พาไปเปิดไฟล์ถ้า drop นอก dropzone (improve UX)
+      ['dragenter', 'dragover'].forEach(function (evt) {
+        dz.addEventListener(evt, function (e) {
+          e.preventDefault();
+          e.stopPropagation();
+          if (state.editPhotoUploading) return;
+          dz.classList.add('is-dragover');
+        });
+      });
+      ['dragleave', 'dragend'].forEach(function (evt) {
+        dz.addEventListener(evt, function (e) {
+          e.preventDefault();
+          e.stopPropagation();
+          dz.classList.remove('is-dragover');
+        });
+      });
+      dz.addEventListener('drop', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        dz.classList.remove('is-dragover');
+        if (state.editPhotoUploading) return;
+        const files = e.dataTransfer && e.dataTransfer.files;
+        if (files && files.length) onPhotoFileSelected(files[0]);
+      });
+
+      // กัน browser เปิดไฟล์ ถ้า user drop นอก dropzone โดยบังเอิญ (เสริม global guard เฉพาะตอน modal เปิด)
+      // ไม่ต้อง attach global listener — UX dropzone ชัดเจนอยู่แล้ว และ drop นอก label จะเปิดเฉพาะถ้า browser รองรับ
+    }
+  }
+
   // =================================================================
   function showSplash() {
     document.getElementById('app-splash').hidden = false;
