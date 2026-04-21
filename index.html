@@ -1,9 +1,9 @@
 <!DOCTYPE html>
 <!--
   ================================================================
-  BE-TPP Admin Portal — Round C.3a (Edit Device Modal)
+  BE-TPP Admin Portal — Round C.3a + patch1
   ================================================================
-  Version:     v0.3.0 (Round C.3a — Edit device modal + form + validation + row-click)
+  Version:     v0.3.1 (patch1: composite-key fix for shared devices + mobile owner alignment)
   Released:    21 April 2026
   File:        be-tpp-admin.html
   Author:      Claude (AI pair programmer) + Warunyu
@@ -12,7 +12,7 @@
   Backend:     Supabase brgzimwzcfbwkgymqzvy (Mumbai AWS, FREE)
   DS:          Tactical-Lite v1.3.0 (selective copy)
 
-  --- Rounds C.1 + C.2 + C.3a Scope ---
+  --- Rounds C.1 + C.2 + C.3a + patch1 Scope ---
   [A] App shell + sidebar + topbar (responsive 3 viewports)          [C.1]
   [B] Email OTP authentication (2-step: email -> code)                [C.1]
   [C] Admin guard (is_admin() RPC check)                              [C.1]
@@ -24,8 +24,16 @@
   [I] Refresh controls + updated-at timestamp                         [C.2]
   [J] Edit device modal + 15 fields + validation + B3 row-click       [C.3a]
 
-  --- Not in C.3a (coming later) ---
-  C.3b: Photo upload with client-side resize + dropzone
+  --- patch1 (v0.3.1) — critical bug fixes ---
+  [Q2.3] Composite-key lookup: ใช้ (user_id, device_id) แทน device_id เดี่ยว
+         เดิม .find() คืน record แรกเสมอ → เปิด modal ผิด owner เมื่อ device
+         ถูก share ระหว่างหลาย user (เช่น 582D34712B43 = hugh/warunyu/fatih+1)
+         + เสี่ยง save ไปผิดคนเพราะ admin_update_device ใช้ composite key
+  [Q2.4] Mobile owner cell: เพิ่ม text-align:right ให้ name+email ชิดขวา
+         เหมือน single-email rows (cosmetic)
+
+  --- Not in v0.3.1 (coming later) ---
+  C.3b: Photo upload with client-side resize + dropzone (→ next chat)
   C.4:  PWA wrapper (manifest, service worker)
   Round D: User management UI
 
@@ -1899,6 +1907,10 @@
       text-align: left;           /* reset จาก desktop inline style */
       justify-content: space-between;
     }
+    /* Q2.4 fix (patch1): Owner cell on mobile — text-align:right so name+email lines ชิดขวา
+       The flex layout positions the .t-cell-owner box on the right, but without text-align
+       the inner divs (name/email) ชิดซ้ายภายใน box และเห็นช่องว่างขวา */
+    .t-table tbody td .t-cell-owner { text-align: right; }
 
     .t-toolbar { flex-direction: column; align-items: stretch; }
     .t-toolbar-right { margin-left: 0; justify-content: flex-end; }
@@ -3867,7 +3879,10 @@
       : '<div class="t-table-thumb"><i class="ti ti-device-desktop-analytics"></i></div>';
 
     return (
-      '<tr data-device-id="' + sanitizeHTML(devId) + '">' +
+      // patch1 (Q2.3 fix): composite key — ต้องมี data-user-id เพื่อระบุ record ที่ถูกต้อง
+      // เมื่อ device_id ซ้ำกันได้ถึง 3 user (shared devices). ใช้ d.userId จาก normalizeDevice().
+      '<tr data-device-id="' + sanitizeHTML(devId) + '" data-user-id="' +
+        sanitizeHTML(d.userId || '') + '">' +
         // Device cell
         '<td data-label="' + sanitizeHTML(t('devices.col.device')) + '">' +
           '<div class="t-table-row-flex">' +
@@ -3900,8 +3915,11 @@
         '</td>' +
         // Actions
         '<td data-label="' + sanitizeHTML(t('devices.col.actions')) + '" class="t-cell-actions">' +
-          '<button type="button" class="t-btn v-ghost btn-sm" data-action="edit" data-device-id="' +
-            sanitizeHTML(devId) + '" title="' + sanitizeHTML(t('edit.title')) + '" aria-label="' +
+          // patch1 (Q2.3 fix): button ยังต้องมี data-user-id ด้วย เพราะ event handler อ่านจาก button ก่อน
+          '<button type="button" class="t-btn v-ghost btn-sm" data-action="edit" ' +
+            'data-device-id="' + sanitizeHTML(devId) + '" ' +
+            'data-user-id="' + sanitizeHTML(d.userId || '') + '" ' +
+            'title="' + sanitizeHTML(t('edit.title')) + '" aria-label="' +
             sanitizeHTML(t('edit.title')) + '">' +
             '<i class="ti ti-edit"></i>' +
           '</button>' +
@@ -4371,18 +4389,33 @@
   }
 
   /**
-   * openEditModalForDeviceId(devId) — look up device by id from state.devices and open modal
-   * Used by edit button clicks AND B3 row-click.
+   * openEditModalForDevice(userId, deviceId) — look up device by composite key (userId, deviceId)
+   *   and open modal. Used by edit button clicks AND B3 row-click.
+   *
+   * patch1 (Q2.3 fix): ตั้งแต่ patch1, lookup ต้องใช้ composite key เพราะ device_id ซ้ำกันได้
+   *   ถึง 3 user (shared device scenario). ก่อน patch1 ใช้แค่ device_id → `.find()`
+   *   คืน record แรกเสมอ → เปิด modal ผิด owner + อาจส่ง update ไปที่ผิด user.
    */
-  function openEditModalForDeviceId(devId) {
-    if (!devId) return;
+  function openEditModalForDevice(userId, deviceId) {
+    if (!deviceId) {
+      console.warn('[edit] openEditModalForDevice called without deviceId');
+      return;
+    }
+    if (!userId) {
+      console.warn('[edit] openEditModalForDevice called without userId — device_id alone is not unique:', deviceId);
+      showToast('danger', 'common.error', null);
+      return;
+    }
     if (!Array.isArray(state.devices)) {
       console.warn('[edit] device list not loaded — cannot open modal');
       return;
     }
-    const device = state.devices.find(function (d) { return d.deviceId === devId; });
+    const device = state.devices.find(function (d) {
+      return d.deviceId === deviceId && d.userId === userId;
+    });
     if (!device) {
-      console.warn('[edit] device not found in state.devices:', devId);
+      console.warn('[edit] device not found in state.devices for composite key:',
+        { userId: userId, deviceId: deviceId });
       showToast('danger', 'common.error', null);
       return;
     }
@@ -4880,18 +4913,22 @@
       });
     });
 
-    // Delegated handler for Edit action + B3 row-click (Round C.3a)
-    //  - Click on [data-action="edit"] button → open edit modal
+    // Delegated handler for Edit action + B3 row-click (Round C.3a, composite-key-fixed in patch1)
+    //  - Click on [data-action="edit"] button → open edit modal (ใช้ data-user-id + data-device-id)
     //  - Click anywhere else on a device row (tr with data-device-id) → open edit modal (B3 free win)
     //  - Click on .t-card (mobile) with data-device-id → open edit modal
     //  - Click on interactive children (input/select/other buttons) is NOT hijacked
+    //
+    // patch1 (Q2.3 fix): อ่าน data-user-id ด้วย เพราะ device_id ซ้ำกันได้ระหว่าง user ต่างๆ
+    //   (shared device, max 3 per device_id). ใช้ composite key เพื่อเปิด modal ของ owner ที่ถูก.
     document.getElementById('view-devices').addEventListener('click', function (e) {
       // Priority 1: Explicit edit action button
       const editBtn = e.target.closest('[data-action="edit"]');
       if (editBtn) {
         e.preventDefault();
-        const devId = editBtn.getAttribute('data-device-id');
-        openEditModalForDeviceId(devId);
+        const devId  = editBtn.getAttribute('data-device-id');
+        const userId = editBtn.getAttribute('data-user-id');
+        openEditModalForDevice(userId, devId);
         return;
       }
 
@@ -4901,8 +4938,9 @@
 
       const row = e.target.closest('tr[data-device-id], [data-device-id].t-card, [data-device-id].t-card-mobile');
       if (row) {
-        const devId = row.getAttribute('data-device-id');
-        openEditModalForDeviceId(devId);
+        const devId  = row.getAttribute('data-device-id');
+        const userId = row.getAttribute('data-user-id');
+        openEditModalForDevice(userId, devId);
       }
     });
 
