@@ -1,9 +1,9 @@
 <!DOCTYPE html>
 <!--
   ================================================================
-  BE-TPP Admin Portal — Round C.3c v0.5.2
+  BE-TPP Admin Portal — Round C.3c-patch1 v0.5.3
   ================================================================
-  Version:     v0.5.2 (Round C.3c — B9 Last-seen column split: "Last reading" + "Last modified" + tooltips + i18n)
+  Version:     v0.5.3 (Round C.3c-patch1 — swap "Last reading" → "Registered" after discovering admin RPC doesn't return last_seen_seconds)
   Released:    23 April 2026
   File:        be-tpp-admin.html
   Author:      Claude (AI pair programmer) + Warunyu
@@ -11,6 +11,19 @@
   Target:      Hugh (owner, British) + Tarn (admin helper)
   Backend:     Supabase brgzimwzcfbwkgymqzvy (Mumbai AWS, FREE)
   DS:          Tactical-Lite v1.3.0 (selective copy + Upload section [28] ported + new [20] Preview Card)
+
+  --- Round C.3c-patch1 v0.5.3 (23 Apr 2026) — "Last reading" → "Registered" swap ---
+  [DEV-REG] หลัง split column "Last seen" → "Last reading" + "Last modified" ใน v0.5.2
+            พบว่า RPC `admin_list_all_devices` ไม่คืน field `last_seen_seconds`
+            (console verify: has_key=false, type=undefined สำหรับทุก row). ทำให้
+            "Last reading" แสดง "Never" ตลอด — ไร้ประโยชน์จริงๆ.
+            Swap column label + data source เป็น `registered_at` (which IS returned
+            as ISO 8601 string) → admin เห็นข้อมูลที่มีค่าและถูกต้อง:
+            "Device นี้อยู่ในระบบมานานแค่ไหน?" + "แก้ไขล่าสุดเมื่อไหร่?"
+            i18n keys: lastReading/tooltip.lastReading → registered/tooltip.registered
+            (EN: "Registered" / TH: "ลงทะเบียนเมื่อ")
+            CSS `.t-cell-lastseen.is-never` เก็บไว้ (DORMANT) สำหรับ re-introduce
+            "Last reading" column ภายหลังเมื่อ backend fix RPC ให้คืน field.
 
   --- Round C.3c v0.5.2 (23 Apr 2026) — B9 Last-seen column split ---
   [B9] Split ambiguous "Last seen" column into 2 distinct columns:
@@ -25,6 +38,8 @@
          devices.tooltip.lastReading, devices.tooltip.lastModified
        Removed i18n key `devices.col.lastSeen` (no longer referenced).
        Frontend-only change: zero DB/RPC/schema impact (reuse existing fields).
+       *Superseded (partially) by C.3c-patch1 v0.5.3 — lastReading keys re-swapped
+        to registered keys after discovering RPC limitation.
 
   --- Round C.3d-patch1 v0.5.1 (22 Apr 2026) — Preview polish (4 fixes) ---
   [P1] Place ID validation Level C — `buildGoogleMapsLink` รองรับเฉพาะ Place ID
@@ -1828,6 +1843,9 @@
   }
 
   /* B9 (C.3c): "Never" state — italic muted, override t-mono */
+  /* v0.5.3 note: DORMANT — v0.5.3 swap "Last reading" → "Registered" (ซึ่งมีค่าเสมอ)
+     เก็บ rule นี้ไว้ reuse เมื่อ backend fix RPC admin_list_all_devices
+     ให้คืน last_seen_seconds แล้ว re-introduce "Last reading" column กลับมา */
   .t-cell-lastseen.is-never {
     color: var(--text-low);
     font-style: italic;
@@ -3391,9 +3409,9 @@
       'devices.col.location': 'Location',
       'devices.col.status': 'Status',
       'devices.col.visibility': 'Visibility',
-      'devices.col.lastReading': 'Last reading',
+      'devices.col.registered': 'Registered',
       'devices.col.lastModified': 'Last modified',
-      'devices.tooltip.lastReading': 'Time when sensor last reported data',
+      'devices.tooltip.registered': 'Time when this device was first registered in the system',
       'devices.tooltip.lastModified': 'Time when admin last edited this device record',
       'devices.col.actions': 'Actions',
       'devices.empty.title': 'No devices found',
@@ -3602,9 +3620,9 @@
       'devices.col.location': 'สถานที่',
       'devices.col.status': 'สถานะ',
       'devices.col.visibility': 'การมองเห็น',
-      'devices.col.lastReading': 'ข้อมูล sensor ล่าสุด',
+      'devices.col.registered': 'ลงทะเบียนเมื่อ',
       'devices.col.lastModified': 'แก้ไขล่าสุด',
-      'devices.tooltip.lastReading': 'เวลาที่ sensor รายงานข้อมูลล่าสุด',
+      'devices.tooltip.registered': 'เวลาที่ device ถูกลงทะเบียนในระบบครั้งแรก',
       'devices.tooltip.lastModified': 'เวลาที่ admin แก้ไข device record ล่าสุด',
       'devices.col.actions': 'จัดการ',
       'devices.empty.title': 'ไม่พบอุปกรณ์',
@@ -4635,8 +4653,9 @@
           '<th scope="col">' + sanitizeHTML(t('devices.col.location')) + '</th>' +
           '<th scope="col">' + sanitizeHTML(t('devices.col.status')) + '</th>' +
           '<th scope="col">' + sanitizeHTML(t('devices.col.visibility')) + '</th>' +
-          // B9 (C.3c): Split — Last reading (sensor) + Last modified (save time)
-          '<th scope="col" title="' + sanitizeHTML(t('devices.tooltip.lastReading')) + '">' + sanitizeHTML(t('devices.col.lastReading')) + '</th>' +
+          // C.3c-patch1 (v0.5.3): Registered + Last modified (admin RPC ไม่คืน last_seen_seconds ให้ใช้)
+          //                       "Last reading" column เก็บไว้นำกลับมาใช้เมื่อ backend fix RPC แล้ว
+          '<th scope="col" title="' + sanitizeHTML(t('devices.tooltip.registered')) + '">' + sanitizeHTML(t('devices.col.registered')) + '</th>' +
           '<th scope="col" title="' + sanitizeHTML(t('devices.tooltip.lastModified')) + '">' + sanitizeHTML(t('devices.col.lastModified')) + '</th>' +
           '<th scope="col" class="t-cell-actions">' + sanitizeHTML(t('devices.col.actions')) + '</th>' +
         '</tr></thead>' +
@@ -4690,11 +4709,10 @@
       ? '<span class="t-badge v-info">' + sanitizeHTML(t('status.public')) + '</span>'
       : '<span class="t-badge v-neutral">' + sanitizeHTML(t('status.private')) + '</span>';
 
-    // B9 (C.3c): Split "Last seen" → "Last reading" + "Last modified"
-    // REMOVED fallback: ถ้าไม่มี sensor reading → "Never" (italic), ไม่ fallback ไป updatedAt
-    const hasSensorReading = d.lastSeenSeconds != null;
-    const lastReadingTxt = hasSensorReading ? formatRelativeTime(d.lastSeenSeconds) : t('time.never');
-    // updatedAt มีค่าเสมอ (DEFAULT NOW() ใน schema) — fallback 'Never' เผื่อ edge case
+    // C.3c-patch1 (v0.5.3): Registered + Last modified (lastSeenSeconds ไม่ใช้แล้วเพราะ RPC ไม่คืน field)
+    // registered_at + updated_at มีค่าเสมอ (DEFAULT NOW() ใน schema)
+    // fallback 'Never' เผื่อ edge case เท่านั้น
+    const registeredTxt = d.registeredAt ? formatRelativeTime(d.registeredAt) : t('time.never');
     const lastModifiedTxt = d.updatedAt ? formatRelativeTime(d.updatedAt) : t('time.never');
 
     // Photo thumb
@@ -4736,14 +4754,11 @@
         '<td data-label="' + sanitizeHTML(t('devices.col.status')) + '">' + statusHtml + '</td>' +
         // Visibility
         '<td data-label="' + sanitizeHTML(t('devices.col.visibility')) + '">' + visHtml + '</td>' +
-        // B9 (C.3c): Last reading (sensor data — may be "Never" italic)
-        '<td data-label="' + sanitizeHTML(t('devices.col.lastReading')) + '">' +
-          (hasSensorReading
-            ? '<span class="t-mono t-cell-lastseen">' + sanitizeHTML(lastReadingTxt) + '</span>'
-            : '<span class="t-cell-lastseen is-never">' + sanitizeHTML(lastReadingTxt) + '</span>'
-          ) +
+        // C.3c-patch1 (v0.5.3): Registered (registered_at จาก RPC — มีค่าเสมอ)
+        '<td data-label="' + sanitizeHTML(t('devices.col.registered')) + '">' +
+          '<span class="t-mono t-cell-lastseen">' + sanitizeHTML(registeredTxt) + '</span>' +
         '</td>' +
-        // B9 (C.3c): Last modified (save time — updated_at DEFAULT NOW() ใน schema)
+        // Last modified (updated_at DEFAULT NOW() ใน schema)
         '<td data-label="' + sanitizeHTML(t('devices.col.lastModified')) + '">' +
           '<span class="t-mono t-cell-lastseen">' + sanitizeHTML(lastModifiedTxt) + '</span>' +
         '</td>' +
