@@ -1,9 +1,9 @@
 <!DOCTYPE html>
 <!--
   ================================================================
-  BE-TPP Admin Portal — Round C.3b + patch v0.4.2
+  BE-TPP Admin Portal — Round C.3b + patch v0.4.3
   ================================================================
-  Version:     v0.4.2 (Fix A: modal-close after save; Fix B: deleteOldPhoto result checking + detailed logging; Fix C: admin_delete_storage_object RPC — bypass Storage RLS silent-block)
+  Version:     v0.4.3 (Fix A: modal-close after save; Fix B: detailed logging; Fix D: admin-delete-storage-object Edge Function — bypass Supabase Storage guard via service_role)
   Released:    22 April 2026
   File:        be-tpp-admin.html
   Author:      Claude (AI pair programmer) + Warunyu
@@ -11,6 +11,26 @@
   Target:      Hugh (owner, British) + Tarn (admin helper)
   Backend:     Supabase brgzimwzcfbwkgymqzvy (Mumbai AWS, FREE)
   DS:          Tactical-Lite v1.3.0 (selective copy + Upload section [28] ported)
+
+  --- patch v0.4.3 (22 Apr 2026) — Edge Function replaces RPC ---
+  [Fix D] deleteOldPhoto() เปลี่ยนจาก sb.rpc() → sb.functions.invoke()
+          Root cause: patch2 RPC (SECURITY DEFINER + DELETE storage.objects) ถูก
+                      Supabase block ด้วย error 42501 "Direct deletion from
+                      storage tables is not allowed. Use the Storage API instead."
+                      Storage subsystem มี guard layer ที่ SECURITY DEFINER bypass ไม่ได้
+                      policy rewrite (inline EXISTS user_roles) ก็ยัง silent-block
+                      → server-side service_role เป็นทางเดียวที่ bypass ได้ครบ
+          Fix: Supabase Edge Function `admin-delete-storage-object` (Deno/TypeScript)
+               - Layer 1: Authorization header check (401 if missing)
+               - Layer 2: createClient(userJWT).rpc('is_admin') — caller context verify
+               - Layer 3: Bucket whitelist (['device-photos'])
+               - Action: createClient(serviceRoleKey).storage.from(b).remove([p])
+               Return: {success, deleted_count, bucket, path}
+          Deploy: Supabase Studio UI → Edge Functions → Deploy new function
+                  Verify JWT toggle = OFF (ใช้ custom auth ใน code แทน)
+          ห้ามแตะ: extractStoragePathFromUrl (client-side), Fix A guard,
+                  composite-key lookup (patch1 Q2.3), onSaveEditForm flow,
+                  PHOTO_BUCKET constant
 
   --- patch v0.4.2 (22 Apr 2026) — Storage RLS silent-block fix ---
   [Fix C] deleteOldPhoto() เปลี่ยนจาก sb.storage.remove() → sb.rpc('admin_delete_storage_object')
@@ -5046,11 +5066,13 @@
    * deleteOldPhoto(url) — best-effort async delete (swallow errors)
    * เรียกได้กับทั้ง old URL และ pending URL (orphan cleanup)
    *
-   * v0.4.2 (Fix C): เปลี่ยนจาก sb.storage.remove() → admin_delete_storage_object RPC
-   *   เหตุ: Storage RLS silent-block — storage.remove() คืน {data:[], error:null}
-   *         แม้ policy's is_admin() ควร pass (ยืนยัน diagnostic v0.4.1)
-   *   วิธี: RPC ใช้ SECURITY DEFINER → DELETE ตรงจาก storage.objects ข้าม RLS
-   *         มี is_admin() gate + bucket whitelist ที่ฝั่ง SQL
+   * v0.4.3 (Fix D): เปลี่ยนจาก sb.rpc() → sb.functions.invoke()
+   *   เหตุ: Supabase block DELETE ตรงจาก storage.objects table แม้ใน
+   *         SECURITY DEFINER context (error 42501) — policy rewrite ก็ยัง silent-block
+   *         ต้องใช้ service_role key bypass ซึ่งมีแต่ฝั่ง server เท่านั้น
+   *   วิธี: Edge Function `admin-delete-storage-object` ใช้ service_role ลบผ่าน Storage API
+   *         มี Authorization header check + is_admin() RPC + bucket whitelist
+   *         ที่ฝั่ง Edge Function code
    */
   function deleteOldPhoto(url) {
     const path = extractStoragePathFromUrl(url);
@@ -5058,28 +5080,30 @@
       console.log('[photo] skip delete (not our bucket):', url);
       return;
     }
-    // v0.4.2: RPC return shape = {success: bool, deleted_count: int, bucket: str, path: str}
+    // v0.4.3: Edge Function return shape = {success, deleted_count, bucket, path}
     //   - success+count>0 → ลบได้จริง
-    //   - success+count=0 → ไฟล์ไม่มีอยู่ใน storage.objects (ลบไปแล้ว หรือ URL เพี้ยน)
-    //   - error (P0001)   → is_admin()=false หรือ bucket ไม่อยู่ใน whitelist
-    console.log('[photo] attempting delete via RPC:', path);
-    sb.rpc('admin_delete_storage_object', {
-      p_bucket: PHOTO_BUCKET,
-      p_path: path
+    //   - success+count=0 → ไฟล์ไม่มีอยู่ใน Storage (ลบไปแล้ว หรือ URL เพี้ยน)
+    //   - error            → auth fail / not admin / bucket not allowed / network / CORS
+    console.log('[photo] attempting delete via Edge Function:', path);
+    sb.functions.invoke('admin-delete-storage-object', {
+      body: {
+        bucket: PHOTO_BUCKET,
+        path: path
+      }
     }).then(function (result) {
       // Log full response object เพื่อ debug transparency
-      console.log('[photo] RPC response:', result);
+      console.log('[photo] Edge Function response:', result);
       const data = result && result.data;
       const error = result && result.error;
       if (error) {
-        console.warn('[photo] delete RPC failed (non-blocking):', error, path);
+        console.warn('[photo] delete Edge Function failed (non-blocking):', error, path);
       } else if (data && data.success && data.deleted_count > 0) {
-        console.log('[photo] delete CONFIRMED via RPC —', data.deleted_count, 'file(s):', path);
+        console.log('[photo] delete CONFIRMED via Edge Function —', data.deleted_count, 'file(s):', path);
       } else {
-        console.warn('[photo] delete RPC returned zero deletions (file may not exist):', path, data);
+        console.warn('[photo] delete Edge Function returned zero deletions (file may not exist):', path, data);
       }
     }).catch(function (e) {
-      console.warn('[photo] delete RPC threw exception (non-blocking):', e, path);
+      console.warn('[photo] delete Edge Function threw exception (non-blocking):', e, path);
     });
   }
 
