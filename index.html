@@ -1,9 +1,9 @@
 <!DOCTYPE html>
 <!--
   ================================================================
-  BE-TPP Admin Portal — Round C.3b (Photo Upload Pipeline)
+  BE-TPP Admin Portal — Round C.3b + patch v0.4.1
   ================================================================
-  Version:     v0.4.0 (C.3b: Dropzone + Canvas resize + Storage upload + delete-old)
+  Version:     v0.4.1 (Fix A: modal-close after save; Fix B: deleteOldPhoto result checking + detailed logging)
   Released:    22 April 2026
   File:        be-tpp-admin.html
   Author:      Claude (AI pair programmer) + Warunyu
@@ -11,6 +11,20 @@
   Target:      Hugh (owner, British) + Tarn (admin helper)
   Backend:     Supabase brgzimwzcfbwkgymqzvy (Mumbai AWS, FREE)
   DS:          Tactical-Lite v1.3.0 (selective copy + Upload section [28] ported)
+
+  --- patch v0.4.1 (22 Apr 2026) — post-C.3b bug fixes ---
+  [Fix A] Modal ไม่ปิดเองหลัง Save success (pre-existing bug since C.3a)
+          Root cause: onSaveEditForm() เรียก closeEditModal(true) ขณะที่
+          state.editSaving ยังเป็น true (เพิ่งจะ false ใน finally block) →
+          guard "if (state.editSaving) return" early-return เสมอ → modal ไม่ปิด
+          Fix: guard → "if (state.editSaving && !force) return" — force=true
+          (จาก save success) ผ่านได้, user-close (Cancel/Esc/backdrop) ยังโดน block
+  [Fix B] deleteOldPhoto log "deleted" ทุกครั้งแม้ Supabase จะไม่ลบไฟล์จริง
+          Root cause: storage.remove() คืน { data: [], error: null } เมื่อ RLS block
+          หรือไฟล์ไม่มีอยู่ — shape เดียวกับ success แบบผิวเผิน ต่างกันที่ data.length
+          Code เดิมเช็คแค่ result.error → log "deleted" แม้ data ว่าง
+          Fix: เช็ค result.data.length ด้วย + log full response + 3 cases แยกกัน
+          (CONFIRMED / EMPTY/RLS-blocked / error) เพื่อให้ diagnose ต่อได้
 
   --- Rounds C.1 + C.2 + C.3a + patch1 + C.3b Scope ---
   [A] App shell + sidebar + topbar (responsive 3 viewports)          [C.1]
@@ -23,7 +37,7 @@
   [H] Device list: search + filter chips + table/cards + pagination   [C.2]
   [I] Refresh controls + updated-at timestamp                         [C.2]
   [J] Edit device modal + 15 fields + validation + B3 row-click       [C.3a]
-  [K] Photo upload: dropzone + resize + Storage + delete-old          [C.3b] NEW
+  [K] Photo upload: dropzone + resize + Storage + delete-old          [C.3b]
 
   --- patch1 (v0.3.1) — critical bug fixes (PRESERVED in v0.4.0) ---
   [Q2.3] Composite-key lookup: ใช้ (user_id, device_id) แทน device_id เดี่ยว
@@ -4547,9 +4561,14 @@
 
   /**
    * closeEditModal(force) — close modal; if dirty and !force → show confirm-close modal
+   *
+   * patch v0.4.1 (Fix A): guard "state.editSaving" เดิมเป็น early-return เสมอ → blocking
+   *   การปิดอัตโนมัติหลัง save success เพราะ onSaveEditForm เรียก closeEditModal(true)
+   *   ขณะที่ state.editSaving ยังเป็น true (เพิ่งจะ false ใน finally block)
+   *   แก้: allow force=true ผ่าน guard — user action (Cancel/Esc/backdrop) ยังโดน block ปกติ
    */
   function closeEditModal(force) {
-    if (state.editSaving) return;  // don't close during save
+    if (state.editSaving && !force) return;  // v0.4.1: user-close blocked during save; force-close allowed
     if (!force && state.editFormTouched) {
       openConfirmCloseModal();
       return;
@@ -5015,15 +5034,30 @@
    */
   function deleteOldPhoto(url) {
     const path = extractStoragePathFromUrl(url);
-    if (!path) return;   // external URL — ไม่ใช่ bucket เราเลย ไม่ต้องลบ
+    if (!path) {
+      console.log('[photo] skip delete (not our bucket):', url);
+      return;
+    }
+    // v0.4.1 (Fix B): Supabase storage.remove() คืน shape เดียวกันในทุก failure mode:
+    //   - ลบได้จริง     → { data: [{name, id, ...}], error: null }     ← data.length > 0
+    //   - RLS block     → { data: [], error: null }                     ← data ว่าง, ไม่มี error!
+    //   - ไฟล์ไม่มี      → { data: [], error: null }                     ← เหมือนกันเป๊ะ
+    // ดังนั้นต้องเช็ค result.data.length ด้วย (ไม่ใช่แค่ result.error)
+    // เดิมเราดูแค่ error → log "deleted" ทุกครั้ง → เข้าใจผิดว่า RLS ให้ผ่าน (Bug #2 diagnostic)
+    console.log('[photo] attempting delete:', path);
     sb.storage.from(PHOTO_BUCKET).remove([path]).then(function (result) {
+      // Log full response object เพื่อ debug transparency
+      console.log('[photo] remove() response:', result);
       if (result && result.error) {
-        console.warn('[photo] delete old photo failed (non-blocking):', result.error, path);
+        console.warn('[photo] delete FAILED with error (non-blocking):', result.error, path);
+      } else if (!result || !Array.isArray(result.data) || result.data.length === 0) {
+        // RLS silent-block OR file didn't exist — API shape identical
+        console.warn('[photo] delete returned EMPTY data — RLS blocked OR file not found:', path);
       } else {
-        console.log('[photo] deleted old photo:', path);
+        console.log('[photo] delete CONFIRMED —', result.data.length, 'file(s) removed:', path);
       }
     }).catch(function (e) {
-      console.warn('[photo] delete old photo threw (non-blocking):', e, path);
+      console.warn('[photo] delete threw exception (non-blocking):', e, path);
     });
   }
 
