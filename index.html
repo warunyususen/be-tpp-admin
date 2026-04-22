@@ -1,9 +1,9 @@
 <!DOCTYPE html>
 <!--
   ================================================================
-  BE-TPP Admin Portal — Round C.3b + patch v0.4.1
+  BE-TPP Admin Portal — Round C.3b + patch v0.4.2
   ================================================================
-  Version:     v0.4.1 (Fix A: modal-close after save; Fix B: deleteOldPhoto result checking + detailed logging)
+  Version:     v0.4.2 (Fix A: modal-close after save; Fix B: deleteOldPhoto result checking + detailed logging; Fix C: admin_delete_storage_object RPC — bypass Storage RLS silent-block)
   Released:    22 April 2026
   File:        be-tpp-admin.html
   Author:      Claude (AI pair programmer) + Warunyu
@@ -11,6 +11,20 @@
   Target:      Hugh (owner, British) + Tarn (admin helper)
   Backend:     Supabase brgzimwzcfbwkgymqzvy (Mumbai AWS, FREE)
   DS:          Tactical-Lite v1.3.0 (selective copy + Upload section [28] ported)
+
+  --- patch v0.4.2 (22 Apr 2026) — Storage RLS silent-block fix ---
+  [Fix C] deleteOldPhoto() เปลี่ยนจาก sb.storage.remove() → sb.rpc('admin_delete_storage_object')
+          Root cause: Supabase Storage RLS evaluate is_admin() ใน policy qual แล้ว
+                      silent-block ทั้งที่ RPC context is_admin()=true (ยืนยันผ่าน
+                      diagnostic script v0.4.1 บน warunyu = super_admin)
+                      storage.remove() คืน {data:[], error:null} เหมือนกันทั้งกรณี
+                      RLS-block และไฟล์ไม่มีอยู่ → client แยกไม่ได้
+          Fix: SQL RPC admin_delete_storage_object(p_bucket, p_path) — SECURITY DEFINER
+               + is_admin() gate + bucket whitelist (device-photos only)
+               DELETE ตรงจาก storage.objects → bypass Storage RLS
+               Return jsonb {success, deleted_count, bucket, path}
+          ห้ามแตะ: extractStoragePathFromUrl (ยัง client-side), Fix A guard,
+                  composite-key lookup (patch1 Q2.3), onSaveEditForm flow
 
   --- patch v0.4.1 (22 Apr 2026) — post-C.3b bug fixes ---
   [Fix A] Modal ไม่ปิดเองหลัง Save success (pre-existing bug since C.3a)
@@ -5031,6 +5045,12 @@
   /**
    * deleteOldPhoto(url) — best-effort async delete (swallow errors)
    * เรียกได้กับทั้ง old URL และ pending URL (orphan cleanup)
+   *
+   * v0.4.2 (Fix C): เปลี่ยนจาก sb.storage.remove() → admin_delete_storage_object RPC
+   *   เหตุ: Storage RLS silent-block — storage.remove() คืน {data:[], error:null}
+   *         แม้ policy's is_admin() ควร pass (ยืนยัน diagnostic v0.4.1)
+   *   วิธี: RPC ใช้ SECURITY DEFINER → DELETE ตรงจาก storage.objects ข้าม RLS
+   *         มี is_admin() gate + bucket whitelist ที่ฝั่ง SQL
    */
   function deleteOldPhoto(url) {
     const path = extractStoragePathFromUrl(url);
@@ -5038,26 +5058,28 @@
       console.log('[photo] skip delete (not our bucket):', url);
       return;
     }
-    // v0.4.1 (Fix B): Supabase storage.remove() คืน shape เดียวกันในทุก failure mode:
-    //   - ลบได้จริง     → { data: [{name, id, ...}], error: null }     ← data.length > 0
-    //   - RLS block     → { data: [], error: null }                     ← data ว่าง, ไม่มี error!
-    //   - ไฟล์ไม่มี      → { data: [], error: null }                     ← เหมือนกันเป๊ะ
-    // ดังนั้นต้องเช็ค result.data.length ด้วย (ไม่ใช่แค่ result.error)
-    // เดิมเราดูแค่ error → log "deleted" ทุกครั้ง → เข้าใจผิดว่า RLS ให้ผ่าน (Bug #2 diagnostic)
-    console.log('[photo] attempting delete:', path);
-    sb.storage.from(PHOTO_BUCKET).remove([path]).then(function (result) {
+    // v0.4.2: RPC return shape = {success: bool, deleted_count: int, bucket: str, path: str}
+    //   - success+count>0 → ลบได้จริง
+    //   - success+count=0 → ไฟล์ไม่มีอยู่ใน storage.objects (ลบไปแล้ว หรือ URL เพี้ยน)
+    //   - error (P0001)   → is_admin()=false หรือ bucket ไม่อยู่ใน whitelist
+    console.log('[photo] attempting delete via RPC:', path);
+    sb.rpc('admin_delete_storage_object', {
+      p_bucket: PHOTO_BUCKET,
+      p_path: path
+    }).then(function (result) {
       // Log full response object เพื่อ debug transparency
-      console.log('[photo] remove() response:', result);
-      if (result && result.error) {
-        console.warn('[photo] delete FAILED with error (non-blocking):', result.error, path);
-      } else if (!result || !Array.isArray(result.data) || result.data.length === 0) {
-        // RLS silent-block OR file didn't exist — API shape identical
-        console.warn('[photo] delete returned EMPTY data — RLS blocked OR file not found:', path);
+      console.log('[photo] RPC response:', result);
+      const data = result && result.data;
+      const error = result && result.error;
+      if (error) {
+        console.warn('[photo] delete RPC failed (non-blocking):', error, path);
+      } else if (data && data.success && data.deleted_count > 0) {
+        console.log('[photo] delete CONFIRMED via RPC —', data.deleted_count, 'file(s):', path);
       } else {
-        console.log('[photo] delete CONFIRMED —', result.data.length, 'file(s) removed:', path);
+        console.warn('[photo] delete RPC returned zero deletions (file may not exist):', path, data);
       }
     }).catch(function (e) {
-      console.warn('[photo] delete threw exception (non-blocking):', e, path);
+      console.warn('[photo] delete RPC threw exception (non-blocking):', e, path);
     });
   }
 
