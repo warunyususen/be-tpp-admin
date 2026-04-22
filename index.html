@@ -1,9 +1,9 @@
 <!DOCTYPE html>
 <!--
   ================================================================
-  BE-TPP Admin Portal — Round C.3d COMPLETE v0.5.0
+  BE-TPP Admin Portal — Round C.3d-patch1 v0.5.1
   ================================================================
-  Version:     v0.5.0 (Round C.3d complete — B13 Map Preview card: BEFF Map mockup modal-within-modal, read-only render from edit form state, light-mode fidelity with Prototype V6, Google Maps deep-link on address)
+  Version:     v0.5.1 (Round C.3d-patch1 — preview polish: Place ID validation Level C, placeholder sanitize across BEFF fields, X-button desktop clip fix, em-dash AQI alignment)
   Released:    22 April 2026
   File:        be-tpp-admin.html
   Author:      Claude (AI pair programmer) + Warunyu
@@ -11,6 +11,34 @@
   Target:      Hugh (owner, British) + Tarn (admin helper)
   Backend:     Supabase brgzimwzcfbwkgymqzvy (Mumbai AWS, FREE)
   DS:          Tactical-Lite v1.3.0 (selective copy + Upload section [28] ported + new [20] Preview Card)
+
+  --- Round C.3d-patch1 v0.5.1 (22 Apr 2026) — Preview polish (4 fixes) ---
+  [P1] Place ID validation Level C — `buildGoogleMapsLink` รองรับเฉพาะ Place ID
+       ที่ผ่าน regex `^[A-Za-z0-9_-]+$` และ length >= 15 chars. ค่าอย่าง "-",
+       "abc", "ChIJ 123" ถูก reject → fallback ไปใช้ lat/lng → ถ้าไม่มีก็ไม่สร้าง link.
+       Root cause: v0.5.0 check แค่ truthy + trim() → user ใส่ "-" (placeholder)
+       → สร้าง URL "place/?q=place_id:-" → Google Maps ไม่รู้จัก → redirect ไปพิกัด
+       ตาม IP ของ user (ห่างจากสถานที่จริง 5+ km).
+  [P2] Preview placeholder sanitize — new helper isPlaceholder() treat common
+       placeholder strings as empty (`-`, `--`, `.`, `n/a`, `null`, `none`, etc.,
+       case-insensitive). ใช้ใน renderPreviewCard() สำหรับ location_name/category/
+       address/email/phone/website → row ถูก hide ถ้าค่าเป็น placeholder (เหมือน empty).
+       ช่วย admin ที่ใส่ "-" เพื่อเลี่ยง form validation เห็น preview ที่สะอาด.
+  [P3] X-button desktop clip fix — `.preview-modal-close` เปลี่ยน top/right
+       จาก -4px → 4px (ย้ายเข้ามาใน modal container) แก้ปัญหา overflow-y: auto
+       ของ .preview-modal บังคับให้ overflow-x: auto ด้วย → ยื่นนอกกรอบถูก clip
+       เฉพาะบน desktop. Mobile (<640px) ไม่กระทบ (CSS override เป็น top/right: 0 อยู่แล้ว).
+  [P4] em-dash AQI alignment — .preview-aqi-value.is-mock ลด font-size 42 → 32px
+       + letter-spacing 0 + เปลี่ยน glyph จาก em-dash (—) → hyphen-minus (-).
+       em-dash ที่ 42px กว้าง ~42px + glyph อยู่ middle → ไม่ align กับ baseline
+       ของ label "PM2.5 (µg/m³)". Hyphen-minus ที่ 32px แข็งแรงและ align baseline
+       ถูกต้อง. Weather items (—°C/—%) คงไว้ (13px เล็ก ไม่มีผลต่อการ align).
+
+  Do NOT regress (v0.5.1): ทุกอย่างจาก v0.5.0 — Fix A/B/D, onSaveEditForm,
+  EDIT_FIELD_MAP, photo pipeline, composite-key, i18n dicts, CSS [20] base
+  (เฉพาะ mock value + close button position ถูกแก้), preview-hero, preview-title,
+  preview-contacts structure. Preview flow architecture คงเดิม — แก้เฉพาะ guards
+  + visual alignment.
 
   --- Round C.3d v0.5.0 (22 Apr 2026) — B13 Map Preview Card ---
   [B13] Preview button in edit modal footer (ghost + ti-eye icon) opens
@@ -2257,10 +2285,14 @@
   }
 
   /* ---------- Floating close button ---------- */
+  /* C.3d-patch1 v0.5.1: top/right 4px (in-frame) แทน -4px (out-of-frame) —
+     .preview-modal มี overflow-y: auto ซึ่ง browser compute overflow-x: auto
+     ด้วย → close button ที่ยื่นออก -4px ถูก clip บน desktop. Mobile (<640px)
+     ไม่กระทบเพราะ media query override เป็น top/right: 0 อยู่แล้ว. */
   .preview-modal-close {
     position: absolute;
-    top: -4px;
-    right: -4px;
+    top: 4px;
+    right: 4px;
     width: 36px;
     height: 36px;
     border-radius: 50%;
@@ -2429,8 +2461,14 @@
     letter-spacing: -0.02em;
   }
   .preview-aqi-value.is-mock {
+    /* C.3d-patch1 v0.5.1: mock-state overrides for proper dash alignment —
+       base 42px + em-dash glyph (middle-of-em position) didn't align with
+       "PM2.5 (µg/m³)" baseline. Smaller hyphen-minus at 32px + zero
+       letter-spacing + baseline-friendly glyph fixes alignment. */
     color: #6B7280;
     font-weight: 500;
+    font-size: 32px;
+    letter-spacing: 0;
   }
   .preview-aqi-unit {
     font-size: 13px;
@@ -5125,12 +5163,65 @@
   }
 
   /**
+   * isPlaceholder(value) — C.3d-patch1 v0.5.1
+   * Returns true if value is empty OR a common placeholder string
+   * (case-insensitive, whitespace-trimmed).
+   *
+   * Purpose: Users sometimes type "-" or "N/A" instead of leaving a field
+   * blank (e.g., to bypass perceived form-validation). In the preview render,
+   * such values should be treated as missing so the card looks clean —
+   * rather than showing a contact row with just a dash.
+   *
+   * Note: Does NOT mutate the underlying form value or DB record — this is
+   * a render-time filter only. Save-time sanitize is tracked for C.3d-p2.
+   */
+  function isPlaceholder(value) {
+    if (value === null || value === undefined) return true;
+    if (typeof value !== 'string') return false;
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) return true;
+    const BLANK_PLACEHOLDERS = [
+      '-', '--', '---',
+      '.', '..', '...',
+      'n/a', 'na',
+      'null', 'none',
+      '#', '?'
+    ];
+    return BLANK_PLACEHOLDERS.indexOf(normalized) !== -1;
+  }
+
+  /**
+   * isValidPlaceId(placeId) — C.3d-patch1 v0.5.1
+   * Level C validation: length >= 15 chars AND matches /^[A-Za-z0-9_-]+$/.
+   *
+   * Google Place IDs use URL-safe Base64-like chars only (no spaces, no
+   * punctuation) and are always 15+ chars. Classic "ChIJ..." = 27 chars,
+   * extended variants 30-60 chars.
+   *
+   * Rejects:
+   *   - placeholder strings ("-", "N/A") — too short
+   *   - short inputs ("abc")             — too short
+   *   - strings with whitespace/symbols  — wrong charset
+   *
+   * Does NOT check prefix (ChIJ / Eh / Gh / Ij) because newer Google formats
+   * may use different prefixes — prefix check risks rejecting valid IDs.
+   */
+  function isValidPlaceId(placeId) {
+    if (!placeId || typeof placeId !== 'string') return false;
+    const trimmed = placeId.trim();
+    if (trimmed.length < 15) return false;
+    return /^[A-Za-z0-9_-]+$/.test(trimmed);
+  }
+
+  /**
    * buildGoogleMapsLink(placeId, lat, lng) — C.3d B13
    * Constructs Google Maps deep-link URL. Returns null if no usable signal.
    * Priority: place_id (business profile) > lat/lng (map pin) > null.
    */
   function buildGoogleMapsLink(placeId, lat, lng) {
-    if (placeId && typeof placeId === 'string' && placeId.trim()) {
+    // C.3d-patch1: strict Place ID validation (Level C) —
+    // rejects placeholders like "-", short strings, invalid charsets.
+    if (isValidPlaceId(placeId)) {
       return 'https://www.google.com/maps/place/?q=place_id:' + encodeURIComponent(placeId.trim());
     }
     const latNum = parseFloat(lat);
@@ -5202,11 +5293,11 @@
         '<div class="preview-hero">' + heroPlaceholderHtml + '</div>';
     }
 
-    // --- 3. Title block ---
-    const titleHtml = locationName
+    // --- 3. Title block (C.3d-patch1: placeholder-aware) ---
+    const titleHtml = !isPlaceholder(locationName)
       ? '<h3 class="preview-title">' + sanitizeHTML(locationName) + '</h3>'
       : '<h3 class="preview-title is-empty">' + sanitizeHTML(t('preview.untitled')) + '</h3>';
-    const categoryHtml = category
+    const categoryHtml = !isPlaceholder(category)
       ? '<p class="preview-category">' + sanitizeHTML(category) + '</p>'
       : '';
 
@@ -5228,7 +5319,7 @@
       '<div class="preview-aqi-chip">' +
         '<div class="preview-aqi-row">' +
           '<div class="preview-aqi-main">' +
-            '<span class="preview-aqi-value is-mock">&mdash;</span>' +
+            '<span class="preview-aqi-value is-mock">-</span>' +
             '<span class="preview-aqi-unit">PM2.5 (&micro;g/m&sup3;)</span>' +
           '</div>' +
           '<div class="preview-aqi-label">' + indoorAvgHtml + '</div>' +
@@ -5243,11 +5334,11 @@
         '</div>' +
       '</div>';
 
-    // --- 5. Contact list (conditional rows) ---
+    // --- 5. Contact list (C.3d-patch1: placeholder-aware — rows hidden if "-", "N/A", etc.) ---
     const rows = [];
 
     // Address — with Google Maps deep-link if possible
-    if (address) {
+    if (!isPlaceholder(address)) {
       const mapLink = buildGoogleMapsLink(placeId, lat, lng);
       let addressInner;
       if (mapLink) {
@@ -5270,7 +5361,7 @@
     }
 
     // Email
-    if (email) {
+    if (!isPlaceholder(email)) {
       rows.push(
         '<div class="preview-contact-row">' +
           '<i class="ti ti-mail" aria-hidden="true"></i>' +
@@ -5280,7 +5371,7 @@
     }
 
     // Phone
-    if (phone) {
+    if (!isPlaceholder(phone)) {
       rows.push(
         '<div class="preview-contact-row">' +
           '<i class="ti ti-phone" aria-hidden="true"></i>' +
@@ -5290,7 +5381,7 @@
     }
 
     // Website
-    if (website) {
+    if (!isPlaceholder(website)) {
       rows.push(
         '<div class="preview-contact-row">' +
           '<i class="ti ti-world" aria-hidden="true"></i>' +
