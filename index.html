@@ -1,16 +1,30 @@
 <!DOCTYPE html>
 <!--
   ================================================================
-  BE-TPP Admin Portal — Round C.3d-patch1 v0.5.1
+  BE-TPP Admin Portal — Round C.3c v0.5.2
   ================================================================
-  Version:     v0.5.1 (Round C.3d-patch1 — preview polish: Place ID validation Level C, placeholder sanitize across BEFF fields, X-button desktop clip fix, em-dash AQI alignment)
-  Released:    22 April 2026
+  Version:     v0.5.2 (Round C.3c — B9 Last-seen column split: "Last reading" + "Last modified" + tooltips + i18n)
+  Released:    23 April 2026
   File:        be-tpp-admin.html
   Author:      Claude (AI pair programmer) + Warunyu
   Purpose:     Admin portal for Breatheeazy BE-TPP system
   Target:      Hugh (owner, British) + Tarn (admin helper)
   Backend:     Supabase brgzimwzcfbwkgymqzvy (Mumbai AWS, FREE)
   DS:          Tactical-Lite v1.3.0 (selective copy + Upload section [28] ported + new [20] Preview Card)
+
+  --- Round C.3c v0.5.2 (23 Apr 2026) — B9 Last-seen column split ---
+  [B9] Split ambiguous "Last seen" column into 2 distinct columns:
+       - "Last reading" (from lastSeenSeconds) — sensor data time
+       - "Last modified" (from updatedAt) — admin save time
+       REMOVED fallback: ก่อนหน้านี้ถ้า sensor ไม่มีข้อมูล จะ fallback ไป updatedAt
+       ทำให้ admin สับสนว่าเห็น sensor time หรือ save time. ตอนนี้ "Last reading"
+       แสดง "Never" (italic muted via .t-cell-lastseen.is-never) ถ้าไม่มี sensor data.
+       Added native title="" tooltip ที่ <th> อธิบายความหมาย column.
+       Added 4 new i18n keys × 2 langs (EN/TH):
+         devices.col.lastReading, devices.col.lastModified,
+         devices.tooltip.lastReading, devices.tooltip.lastModified
+       Removed i18n key `devices.col.lastSeen` (no longer referenced).
+       Frontend-only change: zero DB/RPC/schema impact (reuse existing fields).
 
   --- Round C.3d-patch1 v0.5.1 (22 Apr 2026) — Preview polish (4 fixes) ---
   [P1] Place ID validation Level C — `buildGoogleMapsLink` รองรับเฉพาะ Place ID
@@ -34,11 +48,11 @@
        ของ label "PM2.5 (µg/m³)". Hyphen-minus ที่ 32px แข็งแรงและ align baseline
        ถูกต้อง. Weather items (—°C/—%) คงไว้ (13px เล็ก ไม่มีผลต่อการ align).
 
-  Do NOT regress (v0.5.1): ทุกอย่างจาก v0.5.0 — Fix A/B/D, onSaveEditForm,
-  EDIT_FIELD_MAP, photo pipeline, composite-key, i18n dicts, CSS [20] base
-  (เฉพาะ mock value + close button position ถูกแก้), preview-hero, preview-title,
-  preview-contacts structure. Preview flow architecture คงเดิม — แก้เฉพาะ guards
-  + visual alignment.
+  Do NOT regress (v0.5.2): ทุกอย่างจาก v0.5.1 — P1/P2/P3/P4 + Fix A/B/D,
+  onSaveEditForm, EDIT_FIELD_MAP, photo pipeline, composite-key, i18n dicts,
+  CSS [20] Preview Card base, preview-hero, preview-title, preview-contacts
+  structure. B9 แตะเฉพาะ renderDeviceTable header + renderDeviceRow cell +
+  i18n keys — ไม่แตะ save path, edit modal, photo, preview, หรือ normalize logic.
 
   --- Round C.3d v0.5.0 (22 Apr 2026) — B13 Map Preview Card ---
   [B13] Preview button in edit modal footer (ghost + ti-eye icon) opens
@@ -1813,6 +1827,12 @@
     white-space: nowrap;
   }
 
+  /* B9 (C.3c): "Never" state — italic muted, override t-mono */
+  .t-cell-lastseen.is-never {
+    color: var(--text-low);
+    font-style: italic;
+  }
+
   /* ==============================================================
      [16b] SEARCH BAR (Round C.2)
      ============================================================== */
@@ -3371,7 +3391,10 @@
       'devices.col.location': 'Location',
       'devices.col.status': 'Status',
       'devices.col.visibility': 'Visibility',
-      'devices.col.lastSeen': 'Last seen',
+      'devices.col.lastReading': 'Last reading',
+      'devices.col.lastModified': 'Last modified',
+      'devices.tooltip.lastReading': 'Time when sensor last reported data',
+      'devices.tooltip.lastModified': 'Time when admin last edited this device record',
       'devices.col.actions': 'Actions',
       'devices.empty.title': 'No devices found',
       'devices.empty.description': 'No devices match your current search or filter. Try adjusting them.',
@@ -3579,7 +3602,10 @@
       'devices.col.location': 'สถานที่',
       'devices.col.status': 'สถานะ',
       'devices.col.visibility': 'การมองเห็น',
-      'devices.col.lastSeen': 'เห็นล่าสุด',
+      'devices.col.lastReading': 'ข้อมูล sensor ล่าสุด',
+      'devices.col.lastModified': 'แก้ไขล่าสุด',
+      'devices.tooltip.lastReading': 'เวลาที่ sensor รายงานข้อมูลล่าสุด',
+      'devices.tooltip.lastModified': 'เวลาที่ admin แก้ไข device record ล่าสุด',
       'devices.col.actions': 'จัดการ',
       'devices.empty.title': 'ไม่พบอุปกรณ์',
       'devices.empty.description': 'ไม่มีอุปกรณ์ตรงกับคำค้น/filter ปัจจุบัน ลองปรับใหม่',
@@ -4609,7 +4635,9 @@
           '<th scope="col">' + sanitizeHTML(t('devices.col.location')) + '</th>' +
           '<th scope="col">' + sanitizeHTML(t('devices.col.status')) + '</th>' +
           '<th scope="col">' + sanitizeHTML(t('devices.col.visibility')) + '</th>' +
-          '<th scope="col">' + sanitizeHTML(t('devices.col.lastSeen')) + '</th>' +
+          // B9 (C.3c): Split — Last reading (sensor) + Last modified (save time)
+          '<th scope="col" title="' + sanitizeHTML(t('devices.tooltip.lastReading')) + '">' + sanitizeHTML(t('devices.col.lastReading')) + '</th>' +
+          '<th scope="col" title="' + sanitizeHTML(t('devices.tooltip.lastModified')) + '">' + sanitizeHTML(t('devices.col.lastModified')) + '</th>' +
           '<th scope="col" class="t-cell-actions">' + sanitizeHTML(t('devices.col.actions')) + '</th>' +
         '</tr></thead>' +
       '<tbody>';
@@ -4662,10 +4690,12 @@
       ? '<span class="t-badge v-info">' + sanitizeHTML(t('status.public')) + '</span>'
       : '<span class="t-badge v-neutral">' + sanitizeHTML(t('status.private')) + '</span>';
 
-    // Last seen
-    const lastSeenTxt = d.lastSeenSeconds != null
-      ? formatRelativeTime(d.lastSeenSeconds)
-      : (d.updatedAt ? formatRelativeTime(d.updatedAt) : t('time.never'));
+    // B9 (C.3c): Split "Last seen" → "Last reading" + "Last modified"
+    // REMOVED fallback: ถ้าไม่มี sensor reading → "Never" (italic), ไม่ fallback ไป updatedAt
+    const hasSensorReading = d.lastSeenSeconds != null;
+    const lastReadingTxt = hasSensorReading ? formatRelativeTime(d.lastSeenSeconds) : t('time.never');
+    // updatedAt มีค่าเสมอ (DEFAULT NOW() ใน schema) — fallback 'Never' เผื่อ edge case
+    const lastModifiedTxt = d.updatedAt ? formatRelativeTime(d.updatedAt) : t('time.never');
 
     // Photo thumb
     const thumbStyle = d.photoUrl
@@ -4706,9 +4736,16 @@
         '<td data-label="' + sanitizeHTML(t('devices.col.status')) + '">' + statusHtml + '</td>' +
         // Visibility
         '<td data-label="' + sanitizeHTML(t('devices.col.visibility')) + '">' + visHtml + '</td>' +
-        // Last seen
-        '<td data-label="' + sanitizeHTML(t('devices.col.lastSeen')) + '">' +
-          '<span class="t-mono t-cell-lastseen">' + sanitizeHTML(lastSeenTxt) + '</span>' +
+        // B9 (C.3c): Last reading (sensor data — may be "Never" italic)
+        '<td data-label="' + sanitizeHTML(t('devices.col.lastReading')) + '">' +
+          (hasSensorReading
+            ? '<span class="t-mono t-cell-lastseen">' + sanitizeHTML(lastReadingTxt) + '</span>'
+            : '<span class="t-cell-lastseen is-never">' + sanitizeHTML(lastReadingTxt) + '</span>'
+          ) +
+        '</td>' +
+        // B9 (C.3c): Last modified (save time — updated_at DEFAULT NOW() ใน schema)
+        '<td data-label="' + sanitizeHTML(t('devices.col.lastModified')) + '">' +
+          '<span class="t-mono t-cell-lastseen">' + sanitizeHTML(lastModifiedTxt) + '</span>' +
         '</td>' +
         // Actions
         '<td data-label="' + sanitizeHTML(t('devices.col.actions')) + '" class="t-cell-actions">' +
